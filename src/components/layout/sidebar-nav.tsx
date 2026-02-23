@@ -37,24 +37,22 @@ export function SidebarNav() {
         <SidebarMenu>
           {navItems.map((item) => (
             <SidebarMenuItem key={item.href}>
-              <Link href={item.href} passHref legacyBehavior>
-                <SidebarMenuButton
-                  asChild
-                  isActive={pathname === item.href}
-                  tooltip={{ children: item.label }}
-                  className="justify-start"
-                >
-                  <a>
-                    <item.icon
-                      className={cn(
-                        'h-5 w-5',
-                        pathname === item.href && 'text-primary neon-glow'
-                      )}
-                    />
-                    <span className="text-base">{item.label}</span>
-                  </a>
-                </SidebarMenuButton>
-              </Link>
+              <SidebarMenuButton
+                asChild
+                isActive={pathname === item.href}
+                tooltip={{ children: item.label }}
+                className="justify-start"
+              >
+                <Link href={item.href}>
+                  <item.icon
+                    className={cn(
+                      'h-5 w-5',
+                      pathname === item.href && 'text-primary neon-glow'
+                    )}
+                  />
+                  <span className="text-base">{item.label}</span>
+                </Link>
+              </SidebarMenuButton>
             </SidebarMenuItem>
           ))}
         </SidebarMenu>
