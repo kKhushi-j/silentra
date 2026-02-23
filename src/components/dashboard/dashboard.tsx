@@ -2,9 +2,9 @@
 
 import { RealtimeMonitor } from './realtime-monitor';
 import { PredictiveAlert } from './predictive-alert';
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
-import { Area, AreaChart, CartesianGrid, XAxis } from 'recharts';
+import { Area, AreaChart } from 'recharts';
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from '../ui/chart';
 
 type NoiseDataPoint = {
@@ -15,20 +15,12 @@ type NoiseDataPoint = {
 export function Dashboard() {
   const [noiseHistory, setNoiseHistory] = useState<NoiseDataPoint[]>([]);
 
-  useEffect(() => {
-    const initialHistory: NoiseDataPoint[] = Array.from({ length: 50 }, (_, i) => ({
-      time: new Date(Date.now() - (50 - i) * 2000).toLocaleTimeString(),
-      decibels: 40 + Math.random() * 15,
-    }));
-    setNoiseHistory(initialHistory);
-  }, []);
-
   const handleNewData = (decibels: number) => {
     setNoiseHistory((prev) => {
       const newHistory = [
         ...prev,
         {
-          time: new Date().toLocaleTimeString(),
+          time: new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', second: '2-digit'}),
           decibels,
         },
       ];
@@ -59,10 +51,10 @@ export function Dashboard() {
                         <stop offset="95%" stopColor="hsl(var(--primary))" stopOpacity={0}/>
                     </linearGradient>
                 </defs>
-                <XAxis dataKey="time" hide />
                 <ChartTooltip
                   cursor={false}
                   content={<ChartTooltipContent hideLabel />}
+                  formatter={(value, name, props) => [`${(props.payload.decibels as number).toFixed(1)} dB`, props.payload.time]}
                 />
                 <Area
                   dataKey="decibels"

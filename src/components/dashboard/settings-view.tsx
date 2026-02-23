@@ -25,7 +25,11 @@ import { Save } from 'lucide-react';
 const environments = [
   { id: 'icu', name: 'ICU', thresholds: { silent: 40, warning: 75, critical: 90 } },
   { id: 'patient-ward', name: 'Patient Ward', thresholds: { silent: 35, warning: 65, critical: 80 } },
+  { id: 'hospital-general', name: 'Hospital (General)', thresholds: { silent: 40, warning: 70, critical: 85 } },
   { id: 'library', name: 'Library', thresholds: { silent: 30, warning: 50, critical: 65 } },
+  { id: 'museum', name: 'Museum', thresholds: { silent: 35, warning: 55, critical: 70 } },
+  { id: 'temple', name: 'Temple / Place of Worship', thresholds: { silent: 30, warning: 45, critical: 60 } },
+  { id: 'court-room', name: 'Court Room', thresholds: { silent: 35, warning: 50, critical: 65 } },
   { id: 'open-office', name: 'Open Office', thresholds: { silent: 45, warning: 60, critical: 75 } },
 ];
 
