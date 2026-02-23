@@ -245,80 +245,6 @@ export function RealtimeMonitor({ onNewData }: RealtimeMonitorProps) {
   const bgColorClass =
     CLASSIFICATION_BG_COLORS[classification] || 'bg-gray-500/10';
 
-  const renderContent = () => {
-    if (hasMicPermission === false && monitoringState === 'live') {
-      return (
-        <div className="flex flex-col items-center justify-center h-full p-4 sm:p-6">
-          <Alert variant="destructive" className="w-full max-w-sm">
-            <MicOff className="h-4 w-4" />
-            <AlertTitle>Microphone Access Required</AlertTitle>
-            <AlertDescription>
-              Enable microphone permissions in your browser to start live
-              monitoring.
-            </AlertDescription>
-          </Alert>
-          <div className="my-8">
-            <NoiseGauge decibels={0} classification="Silent" />
-          </div>
-        </div>
-      );
-    }
-
-    return (
-      <div className="p-4 sm:p-6 flex flex-col items-center justify-center relative">
-        <div className="absolute top-4 right-4 flex gap-2">
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => setIsAudioMuted((p) => !p)}
-                  disabled={monitoringState === 'stopped'}
-                >
-                  {isAudioMuted ? (
-                    <VolumeX className="h-5 w-5" />
-                  ) : (
-                    <Volume2 className="h-5 w-5 text-primary neon-glow" />
-                  )}
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>
-                <p>
-                  {isAudioMuted ? 'Unmute Audio Alerts' : 'Mute Audio Alerts'}
-                </p>
-              </TooltipContent>
-            </Tooltip>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => setIsNotifMuted((p) => !p)}
-                  disabled={monitoringState === 'stopped'}
-                >
-                  {isNotifMuted ? (
-                    <BellOff className="h-5 w-5" />
-                  ) : (
-                    <Bell className="h-5 w-5 text-primary neon-glow" />
-                  )}
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>
-                <p>
-                  {isNotifMuted
-                    ? 'Enable Notifications'
-                    : 'Disable Notifications'}
-                </p>
-              </TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
-        </div>
-        <NoiseGauge decibels={decibels} classification={classification} />
-      </div>
-    );
-  };
-
   return (
     <Card
       className={cn(
@@ -330,7 +256,75 @@ export function RealtimeMonitor({ onNewData }: RealtimeMonitorProps) {
         <CardTitle>Real-time Monitor</CardTitle>
       </CardHeader>
       <CardContent className="flex-1 flex items-center justify-center">
-        {renderContent()}
+        {hasMicPermission === false && monitoringState === 'live' ? (
+          <div className="flex flex-col items-center justify-center h-full p-4 sm:p-6">
+            <Alert variant="destructive" className="w-full max-w-sm">
+              <MicOff className="h-4 w-4" />
+              <AlertTitle>Microphone Access Required</AlertTitle>
+              <AlertDescription>
+                Enable microphone permissions in your browser to start live
+                monitoring.
+              </AlertDescription>
+            </Alert>
+            <div className="my-8">
+              <NoiseGauge decibels={0} classification="Silent" />
+            </div>
+          </div>
+        ) : (
+          <div className="p-4 sm:p-6 flex flex-col items-center justify-center relative">
+            <div className="absolute top-4 right-4 flex gap-2">
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => setIsAudioMuted((p) => !p)}
+                      disabled={monitoringState === 'stopped'}
+                    >
+                      {isAudioMuted ? (
+                        <VolumeX className="h-5 w-5" />
+                      ) : (
+                        <Volume2 className="h-5 w-5 text-primary neon-glow" />
+                      )}
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <p>
+                      {isAudioMuted
+                        ? 'Unmute Audio Alerts'
+                        : 'Mute Audio Alerts'}
+                    </p>
+                  </TooltipContent>
+                </Tooltip>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => setIsNotifMuted((p) => !p)}
+                      disabled={monitoringState === 'stopped'}
+                    >
+                      {isNotifMuted ? (
+                        <BellOff className="h-5 w-5" />
+                      ) : (
+                        <Bell className="h-5 w-5 text-primary neon-glow" />
+                      )}
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <p>
+                      {isNotifMuted
+                        ? 'Enable Notifications'
+                        : 'Disable Notifications'}
+                    </p>
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            </div>
+            <NoiseGauge decibels={decibels} classification={classification} />
+          </div>
+        )}
       </CardContent>
       <CardFooter className="flex flex-col sm:flex-row justify-center items-center gap-4 p-4 border-t">
         {monitoringState === 'stopped' ? (

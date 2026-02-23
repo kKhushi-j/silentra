@@ -1,7 +1,7 @@
 'use client';
 
 import { RealtimeMonitor } from './realtime-monitor';
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Area, AreaChart } from 'recharts';
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from '../ui/chart';
@@ -14,7 +14,7 @@ type NoiseDataPoint = {
 export function Dashboard() {
   const [noiseHistory, setNoiseHistory] = useState<NoiseDataPoint[]>([]);
 
-  const handleNewData = (decibels: number) => {
+  const handleNewData = useCallback((decibels: number) => {
     setNoiseHistory((prev) => {
       const newHistory = [
         ...prev,
@@ -25,7 +25,7 @@ export function Dashboard() {
       ];
       return newHistory.slice(-50); // Keep last 50 data points
     });
-  };
+  }, []);
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
