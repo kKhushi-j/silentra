@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { NoiseGauge } from './noise-gauge';
 import { cn } from '@/lib/utils';
@@ -14,6 +14,7 @@ import {
 } from '../ui/tooltip';
 import { useToast } from '@/hooks/use-toast';
 import { Alert, AlertDescription, AlertTitle } from '../ui/alert';
+import { useAudioAlerts } from '@/hooks/use-audio-alerts';
 
 export type NoiseClassification =
   | 'Silent'
@@ -26,20 +27,10 @@ type RealtimeMonitorProps = {
   onNewData: (decibels: number) => void;
 };
 
-const getClassification = (db: number): NoiseClassification => {
-  if (db < 40) return 'Silent';
-  if (db < 60) return 'Moderate';
-  if (db < 80) return 'Warning';
-  if (db < 100) return 'Critical';
-  return 'Emergency';
-};
-
-const CLASSIFICATION_BG_COLORS: Record<NoiseClassification, string> = {
-  Silent: 'bg-green-500/10',
-  Moderate: 'bg-blue-500/10',
-  Warning: 'bg-yellow-500/10',
-  Critical: 'bg-orange-500/10',
-  Emergency: 'bg-red-500/10',
+const defaultThresholds = { silent: 40, warning: 80, critical: 100 };
+const defaultAlertSettings = {
+  alertType: 'none',
+  voiceMessage: 'Attention: Noise levels are critical.',
 };
 
 export function RealtimeMonitor({ onNewData }: RealtimeMonitorProps) {
@@ -51,10 +42,40 @@ export function RealtimeMonitor({ onNewData }: RealtimeMonitorProps) {
   const [hasMicPermission, setHasMicPermission] = useState<boolean | null>(
     null
   );
+  const [isAlertPlayedForCurrentEvent, setIsAlertPlayedForCurrentEvent] =
+    useState(false);
+
+  const [thresholds, setThresholds] = useState(defaultThresholds);
+  const [alertSettings, setAlertSettings] = useState(defaultAlertSettings);
+
+  const { playAlert } = useAudioAlerts();
   const audioContextRef = useRef<AudioContext | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const animationFrameId = useRef<number | null>(null);
   const { toast } = useToast();
+
+  useEffect(() => {
+    try {
+      const savedSettingsRaw = localStorage.getItem('silentra_settings');
+      if (savedSettingsRaw) {
+        const savedSettings = JSON.parse(savedSettingsRaw);
+        if (savedSettings.thresholds) {
+          setThresholds(savedSettings.thresholds);
+        }
+        if (savedSettings.alertType) {
+          setAlertSettings((s) => ({ ...s, alertType: savedSettings.alertType }));
+        }
+        if (savedSettings.voiceMessage) {
+          setAlertSettings((s) => ({
+            ...s,
+            voiceMessage: savedSettings.voiceMessage,
+          }));
+        }
+      }
+    } catch (e) {
+      console.error('Could not parse settings from localStorage', e);
+    }
+  }, []);
 
   useEffect(() => {
     const getMicPermission = async () => {
@@ -130,10 +151,38 @@ export function RealtimeMonitor({ onNewData }: RealtimeMonitorProps) {
     };
   }, [onNewData, toast]);
 
+  const getClassification = useCallback(
+    (db: number): NoiseClassification => {
+      if (db < thresholds.silent) return 'Silent';
+      if (db < thresholds.warning) return 'Moderate';
+      if (db < thresholds.critical) return 'Warning';
+      if (db < thresholds.critical + 20) return 'Critical';
+      return 'Emergency';
+    },
+    [thresholds]
+  );
+
   useEffect(() => {
     const newClassification = getClassification(decibels);
     setClassification(newClassification);
-  }, [decibels]);
+
+    const isCritical =
+      newClassification === 'Critical' || newClassification === 'Emergency';
+
+    if (isCritical && !isAlertPlayedForCurrentEvent && !isAudioMuted) {
+      playAlert(alertSettings.alertType as any, alertSettings.voiceMessage);
+      setIsAlertPlayedForCurrentEvent(true);
+    } else if (!isCritical && isAlertPlayedForCurrentEvent) {
+      setIsAlertPlayedForCurrentEvent(false);
+    }
+  }, [
+    decibels,
+    isAlertPlayedForCurrentEvent,
+    isAudioMuted,
+    alertSettings,
+    getClassification,
+    playAlert,
+  ]);
 
   const bgColorClass =
     CLASSIFICATION_BG_COLORS[classification] || 'bg-gray-500/10';
@@ -237,3 +286,11 @@ export function RealtimeMonitor({ onNewData }: RealtimeMonitorProps) {
     </Card>
   );
 }
+
+const CLASSIFICATION_BG_COLORS: Record<NoiseClassification, string> = {
+  Silent: 'bg-green-500/10',
+  Moderate: 'bg-blue-500/10',
+  Warning: 'bg-yellow-500/10',
+  Critical: 'bg-orange-500/10',
+  Emergency: 'bg-red-500/10',
+};

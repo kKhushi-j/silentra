@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   Card,
   CardContent,
@@ -21,6 +21,9 @@ import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
 import { Save } from 'lucide-react';
+import { Separator } from '../ui/separator';
+import { RadioGroup, RadioGroupItem } from '../ui/radio-group';
+import { Textarea } from '../ui/textarea';
 
 const environments = [
   { id: 'icu', name: 'ICU', thresholds: { silent: 40, warning: 75, critical: 90 } },
@@ -39,11 +42,41 @@ type Thresholds = {
   critical: number;
 };
 
+type AlertType = 'none' | 'chime' | 'beep' | 'voice';
+
 export function SettingsView() {
   const [selectedEnv, setSelectedEnv] = useState(environments[0]);
   const [thresholds, setThresholds] = useState<Thresholds>(selectedEnv.thresholds);
+  const [alertType, setAlertType] = useState<AlertType>('none');
+  const [voiceMessage, setVoiceMessage] = useState('Attention: Noise levels are critical.');
   const [isSaving, setIsSaving] = useState(false);
   const { toast } = useToast();
+  
+  useEffect(() => {
+    try {
+      const savedSettingsRaw = localStorage.getItem('silentra_settings');
+      if (savedSettingsRaw) {
+          const savedSettings = JSON.parse(savedSettingsRaw);
+          if (savedSettings.environment) {
+              const env = environments.find(e => e.id === savedSettings.environment);
+              if (env) {
+                  setSelectedEnv(env);
+              }
+          }
+          if(savedSettings.thresholds) {
+              setThresholds(savedSettings.thresholds);
+          }
+          if(savedSettings.alertType) {
+              setAlertType(savedSettings.alertType);
+          }
+          if(savedSettings.voiceMessage) {
+              setVoiceMessage(savedSettings.voiceMessage);
+          }
+      }
+    } catch (e) {
+      console.error('Could not parse settings from localStorage', e);
+    }
+  }, []);
 
   const handleEnvChange = (envId: string) => {
     const newEnv = environments.find(e => e.id === envId);
@@ -59,24 +92,30 @@ export function SettingsView() {
 
   const handleSave = () => {
     setIsSaving(true);
-    // Simulate saving to Firestore
+    // Simulate saving to Firestore by saving to localStorage
     setTimeout(() => {
       setIsSaving(false);
+      const settings = {
+        environment: selectedEnv.id,
+        thresholds,
+        alertType,
+        voiceMessage
+      };
+      localStorage.setItem('silentra_settings', JSON.stringify(settings));
       toast({
         title: "Settings Saved",
-        description: `Thresholds for ${selectedEnv.name} have been updated.`,
+        description: `Settings for ${selectedEnv.name} have been updated.`,
       })
-      console.log('Saving to Firestore:', { environment: selectedEnv.id, thresholds });
+      console.log('Saving to localStorage:', settings);
     }, 1000);
   }
 
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Adaptive Threshold Management</CardTitle>
+        <CardTitle>Configuration Settings</CardTitle>
         <CardDescription>
-          Adjust noise level thresholds for different environments. These settings
-          would be saved to Firestore.
+          Adjust noise level thresholds and alert behaviors for different environments.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-8">
@@ -100,23 +139,60 @@ export function SettingsView() {
                 description="Anything below this is 'Silent'."
                 value={thresholds.silent}
                 onValueChange={(value) => handleSliderChange('silent', value)}
-                colorClass="bg-green-500"
             />
              <ThresholdSlider 
                 label="Warning Threshold"
                 description="Noise levels above this trigger a 'Warning'."
                 value={thresholds.warning}
                 onValueChange={(value) => handleSliderChange('warning', value)}
-                colorClass="bg-yellow-500"
             />
              <ThresholdSlider 
                 label="Critical Threshold"
                 description="Noise levels above this are 'Critical' or 'Emergency'."
                 value={thresholds.critical}
                 onValueChange={(value) => handleSliderChange('critical', value)}
-                colorClass="bg-red-500"
             />
         </div>
+
+        <Separator />
+
+        <div className="space-y-4">
+            <h3 className="text-lg font-medium">Audio Alert Settings</h3>
+            <p className="text-sm text-muted-foreground">
+                Choose an audio alert to play when noise exceeds the critical threshold.
+            </p>
+            <RadioGroup value={alertType} onValueChange={(value: any) => setAlertType(value)} className="space-y-2">
+                <div className="flex items-center space-x-2">
+                    <RadioGroupItem value="none" id="r-none" />
+                    <Label htmlFor="r-none">No Sound (Visual Only)</Label>
+                </div>
+                <div className="flex items-center space-x-2">
+                    <RadioGroupItem value="beep" id="r-beep" />
+                    <Label htmlFor="r-beep">Beep Tone</Label>
+                </div>
+                <div className="flex items-center space-x-2">
+                    <RadioGroupItem value="chime" id="r-chime" />
+                    <Label htmlFor="r-chime">Soft Chime</Label>
+                </div>
+                <div className="flex items-center space-x-2">
+                    <RadioGroupItem value="voice" id="r-voice" />
+                    <Label htmlFor="r-voice">Voice Announcement</Label>
+                </div>
+            </RadioGroup>
+
+            {alertType === 'voice' && (
+                <div className="grid w-full gap-2 pt-2">
+                    <Label htmlFor="voice-message" className="pl-1">Announcement Message</Label>
+                    <Textarea
+                        id="voice-message"
+                        value={voiceMessage}
+                        onChange={(e) => setVoiceMessage(e.target.value)}
+                        placeholder="e.g., Attention: Critical noise level detected."
+                    />
+                </div>
+            )}
+        </div>
+
 
       </CardContent>
       <CardFooter>
@@ -134,10 +210,9 @@ interface ThresholdSliderProps {
     description: string;
     value: number;
     onValueChange: (value: number[]) => void;
-    colorClass: string;
 }
 
-function ThresholdSlider({ label, description, value, onValueChange, colorClass }: ThresholdSliderProps) {
+function ThresholdSlider({ label, description, value, onValueChange }: ThresholdSliderProps) {
     return (
         <div className="space-y-3">
             <div className="flex justify-between items-baseline">
