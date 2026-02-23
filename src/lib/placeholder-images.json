@@ -1,3 +1,10 @@
 {
-  "placeholderImages": []
+  "placeholderImages": [
+    {
+      "id": "room-layout",
+      "description": "A blueprint of a room layout",
+      "imageUrl": "https://images.unsplash.com/photo-1675277719117-dfe34237199c?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3NDE5ODJ8MHwxfHNlYXJjaHwxfHxibHVlcHJpbnQlMjByb29tfGVufDB8fHx8MTc3MTg1OTYwOXww&ixlib=rb-4.1.0&q=80&w=1080",
+      "imageHint": "blueprint room"
+    }
+  ]
 }
