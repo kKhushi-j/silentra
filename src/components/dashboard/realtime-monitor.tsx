@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   Card,
   CardContent,
@@ -52,8 +52,6 @@ type MonitoringState = 'stopped' | 'live' | 'simulated';
 
 export function RealtimeMonitor({ onNewData }: RealtimeMonitorProps) {
   const [decibels, setDecibels] = useState(0);
-  const [classification, setClassification] =
-    useState<NoiseClassification>('Silent');
   const [isAudioMuted, setIsAudioMuted] = useState(true);
   const [isNotifMuted, setIsNotifMuted] = useState(true);
   const [hasMicPermission, setHasMicPermission] = useState<boolean | null>(
@@ -214,17 +212,17 @@ export function RealtimeMonitor({ onNewData }: RealtimeMonitorProps) {
     },
     [thresholds]
   );
+  
+  const classification: NoiseClassification = useMemo(() => {
+    if (monitoringState === 'stopped') {
+      return 'Silent';
+    }
+    return getClassification(decibels);
+  }, [decibels, getClassification, monitoringState]);
 
   useEffect(() => {
-    if (monitoringState === 'stopped') {
-      setClassification('Silent');
-      return;
-    }
-    const newClassification = getClassification(decibels);
-    setClassification(newClassification);
-
     const isCritical =
-      newClassification === 'Critical' || newClassification === 'Emergency';
+      classification === 'Critical' || classification === 'Emergency';
 
     if (isCritical && !isAlertPlayedForCurrentEvent && !isAudioMuted) {
       playAlert(alertSettings.alertType as any, alertSettings.voiceMessage);
@@ -233,13 +231,11 @@ export function RealtimeMonitor({ onNewData }: RealtimeMonitorProps) {
       setIsAlertPlayedForCurrentEvent(false);
     }
   }, [
-    decibels,
+    classification,
     isAlertPlayedForCurrentEvent,
     isAudioMuted,
     alertSettings,
-    getClassification,
     playAlert,
-    monitoringState,
   ]);
 
   const bgColorClass =
