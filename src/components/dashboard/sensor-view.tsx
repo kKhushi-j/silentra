@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { doc, setDoc } from 'firebase/firestore';
 import { useFirestore } from '@/firebase';
 import {
@@ -35,24 +35,10 @@ const DEVICE_IDS = [
 
 type DeviceId = 'Mic_A' | 'Mic_B' | 'Mic_C' | 'Mic_D';
 
-const calculateDb = (dataArray: Uint8Array): number => {
-    let sumSquares = 0.0;
-    for (const amplitude of dataArray) {
-        const normalizedAmplitude = amplitude / 128.0 - 1.0;
-        sumSquares += normalizedAmplitude * normalizedAmplitude;
-    }
-    const rms = Math.sqrt(sumSquares / dataArray.length);
-    const effectiveRms = Math.max(rms, 0.00001);
-    let dbValue = 20 * Math.log10(effectiveRms) + 94;
-    dbValue = Math.max(20, Math.min(120, dbValue));
-    return dbValue;
-};
-
-
 export function SensorView() {
   const [isMonitoring, setIsMonitoring] = useState(false);
   const [decibels, setDecibels] = useState(0);
-  const [selectedDevice, setSelectedDevice] = useState<DeviceId>('Mic_A');
+  const [selectedZone, setSelectedZone] = useState<DeviceId>('Mic_A');
   const [hasMicPermission, setHasMicPermission] = useState<boolean | null>(null);
   const [isOnline, setIsOnline] = useState(false);
 
@@ -63,19 +49,23 @@ export function SensorView() {
   const streamRef = useRef<MediaStream | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const dataArrayRef = useRef<Uint8Array | null>(null);
-  const monitoringRef = useRef(false);
-
-  const getCurrentDecibelLevel = (): number => {
-      if (!analyserRef.current || !dataArrayRef.current) {
-          return 0;
-      }
-      analyserRef.current.getByteTimeDomainData(dataArrayRef.current);
-      return calculateDb(dataArrayRef.current);
-  }
-
+  
   const startMonitoring = async () => {
     console.log("Start clicked");
-    setIsMonitoring(true);
+  
+    const deviceRef = doc(db, "devices", selectedZone);
+  
+    try {
+      await setDoc(deviceRef, {
+        level: 50,
+        status: "online",
+        lastUpdated: new Date().toISOString()
+      });
+  
+      console.log("Manual write success");
+    } catch (error) {
+      console.error("Manual write error:", error);
+    }
   };
 
   const stopMonitoring = async () => {
@@ -84,20 +74,29 @@ export function SensorView() {
   };
   
   useEffect(() => {
-    // This is a critical cleanup effect.
-    // It ensures that if the component unmounts (e.g., user navigates away),
-    // we stop monitoring to prevent memory leaks and unnecessary background processing.
     return () => {
-        if (monitoringRef.current) {
-            stopMonitoring();
+        if (isMonitoring) {
+           stopMonitoring();
         }
     };
-    // The empty dependency array [] means this effect runs only once on mount
-    // and its cleanup function runs only once on unmount.
-    // We are disabling the lint rule because stopMonitoring is not a stable function
-    // but we only want this to run on unmount anyway.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [isMonitoring]);
+
+  const getCurrentDecibelLevel = (): number => {
+    if (!analyserRef.current || !dataArrayRef.current) {
+        return 0;
+    }
+    analyserRef.current.getByteTimeDomainData(dataArrayRef.current);
+    let sumSquares = 0.0;
+    for (const amplitude of dataArrayRef.current) {
+      const normalizedAmplitude = amplitude / 128.0 - 1.0;
+      sumSquares += normalizedAmplitude * normalizedAmplitude;
+    }
+    const rms = Math.sqrt(sumSquares / dataArrayRef.current.length);
+    const effectiveRms = Math.max(rms, 0.00001);
+    let dbValue = 20 * Math.log10(effectiveRms) + 94; // 94dB is a common reference for consumer microphones
+    return Math.max(20, Math.min(120, dbValue));
+  }
 
   return (
     <div className="flex justify-center items-center p-4 h-full">
@@ -123,8 +122,8 @@ export function SensorView() {
           <div className="space-y-2">
             <Label htmlFor="device-select">Select Sensor Zone</Label>
             <Select
-              value={selectedDevice}
-              onValueChange={(value) => setSelectedDevice(value as DeviceId)}
+              value={selectedZone}
+              onValueChange={(value) => setSelectedZone(value as DeviceId)}
               disabled={isMonitoring}
             >
               <SelectTrigger id="device-select">
