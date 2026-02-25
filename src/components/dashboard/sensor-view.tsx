@@ -39,7 +39,9 @@ export function SensorView() {
   const [isMonitoring, setIsMonitoring] = useState(false);
   const [decibels, setDecibels] = useState(0);
   const [selectedDevice, setSelectedDevice] = useState<DeviceId>('Mic_A');
-  const [hasMicPermission, setHasMicPermission] = useState<boolean | null>(null);
+  const [hasMicPermission, setHasMicPermission] = useState<boolean | null>(
+    null
+  );
   const [isOnline, setIsOnline] = useState(false);
   
   const db = useFirestore();
@@ -52,6 +54,35 @@ export function SensorView() {
   
   const lastWriteTimeRef = useRef<number>(0);
   const valueHistoryRef = useRef<number[]>([]);
+
+  const testFirestore = async () => {
+    if (!db) {
+      console.error("Firestore DB instance not available for test.");
+      toast({ variant: 'destructive', title: "Firestore Not Initialized" });
+      return;
+    }
+    try {
+      console.log("Manual Firestore test started");
+    
+      await setDoc(
+        doc(db, "devices", "TEST_DEVICE"),
+        {
+          decibel: 99,
+          timestamp: serverTimestamp(),
+          status: "online",
+          zone: "TEST_ZONE"
+        },
+        { merge: true }
+      );
+    
+      console.log("Manual Firestore write success");
+      toast({ title: "Firestore Test", description: "Test write successful!" });
+    
+    } catch (error) {
+      console.error("Manual Firestore write failed:", error);
+      toast({ variant: 'destructive', title: "Firestore Test Failed", description: (error as Error).message });
+    }
+  };
 
   const processAudio = useCallback(() => {
     if (!analyserRef.current || !db) {
@@ -101,6 +132,7 @@ export function SensorView() {
             if (!isOnline) setIsOnline(true);
           } catch (error) {
             console.error("Firestore write failed:", error);
+            // We do NOT change monitoring state here.
           }
         };
         writeToFirestore(smoothedDb);
@@ -250,7 +282,7 @@ export function SensorView() {
             </div>
           </div>
         </CardContent>
-        <CardFooter>
+        <CardFooter className="flex flex-col gap-2">
           {!isMonitoring ? (
             <Button onClick={startMonitoring} size="lg" className="w-full">
               <Radio className="mr-2" /> Start Monitoring
@@ -260,6 +292,9 @@ export function SensorView() {
               <Square className="mr-2" /> Stop Monitoring
             </Button>
           )}
+           <Button onClick={testFirestore} variant="outline" className="w-full">
+              Test Firestore Write
+            </Button>
         </CardFooter>
       </Card>
     </div>
