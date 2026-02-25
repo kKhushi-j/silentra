@@ -43,7 +43,7 @@ export function SensorView() {
     null
   );
   const [isOnline, setIsOnline] = useState(false);
-  
+
   const db = useFirestore();
   const { toast } = useToast();
 
@@ -51,70 +51,89 @@ export function SensorView() {
   const streamRef = useRef<MediaStream | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const animationFrameRef = useRef<number | null>(null);
-  
   const lastWriteTimeRef = useRef<number>(0);
-  const valueHistoryRef = useRef<number[]>([]);
+
+  // Refs for values used in the animation loop to avoid stale closures
+  const dbRef = useRef(db);
+  useEffect(() => {
+    dbRef.current = db;
+  }, [db]);
+  
+  const selectedDeviceRef = useRef(selectedDevice);
+  useEffect(() => {
+    selectedDeviceRef.current = selectedDevice;
+  }, [selectedDevice]);
 
   const processAudio = useCallback(() => {
     if (!analyserRef.current) {
+      animationFrameRef.current = null;
       return;
     }
-    
+
     const dataArray = new Uint8Array(analyserRef.current.fftSize);
     analyserRef.current.getByteTimeDomainData(dataArray);
 
     let sumSquares = 0.0;
     for (const amplitude of dataArray) {
-        const normalizedAmplitude = (amplitude / 128.0) - 1.0;
-        sumSquares += normalizedAmplitude * normalizedAmplitude;
+      const normalizedAmplitude = amplitude / 128.0 - 1.0;
+      sumSquares += normalizedAmplitude * normalizedAmplitude;
     }
     const rms = Math.sqrt(sumSquares / dataArray.length);
-    
-    let dbValue = 20 * Math.log10(rms) + 94; // Adjusted for better range
+    let dbValue = 20 * Math.log10(rms) + 94;
     dbValue = Math.max(20, Math.min(120, dbValue));
 
-    valueHistoryRef.current.push(dbValue);
-    if (valueHistoryRef.current.length > 5) valueHistoryRef.current.shift();
-    const smoothedDb = valueHistoryRef.current.reduce((a, b) => a + b, 0) / valueHistoryRef.current.length;
+    setDecibels(dbValue);
 
-    setDecibels(smoothedDb);
-    
     const now = Date.now();
-    if (db && now - lastWriteTimeRef.current > 1000) { // Throttle writes to 1s
-        lastWriteTimeRef.current = now;
-        const selectedZone = DEVICE_IDS.find(d => d.id === selectedDevice)?.label || 'Unknown';
+    if (now - lastWriteTimeRef.current > 1000) {
+      lastWriteTimeRef.current = now;
+
+      const currentDb = dbRef.current;
+      const currentDeviceId = selectedDeviceRef.current;
+
+      if (currentDb && currentDeviceId) {
+        const selectedZone =
+          DEVICE_IDS.find((d) => d.id === currentDeviceId)?.label || 'Unknown';
         
-        console.log("Writing to Firestore:", selectedDevice);
+        console.log("Writing to Firestore:", currentDeviceId);
         setDoc(
-            doc(db, "devices", selectedDevice),
-            {
-                decibel: smoothedDb,
-                timestamp: serverTimestamp(),
-                zone: selectedZone,
-                status: 'online',
-            },
-            { merge: true }
-        ).then(() => {
-            console.log("Write success");
-            if (!isOnline) setIsOnline(true);
-        }).catch((error) => {
-            console.error("Firestore write failed:", error);
-            // Do not stop monitoring on write failure
+          doc(currentDb, 'devices', currentDeviceId),
+          {
+            decibel: Math.round(dbValue),
+            timestamp: serverTimestamp(),
+            status: 'online',
+            zone: selectedZone,
+          },
+          { merge: true }
+        )
+        .then(() => {
+          console.log("Write success");
+          setIsOnline(true);
+        })
+        .catch((error) => {
+          console.error("Firestore ERROR:", error);
         });
+      }
     }
 
     animationFrameRef.current = requestAnimationFrame(processAudio);
-  }, [db, selectedDevice, isOnline]);
-  
+  }, []);
+
   const startMonitoring = useCallback(async () => {
-    console.log("Attempting to start monitoring...");
     if (!db) {
-        toast({ variant: 'destructive', title: 'Firestore Not Ready', description: 'Please wait a moment and try again.'});
-        console.error("Firestore DB instance not available.");
-        return;
+      toast({
+        variant: 'destructive',
+        title: 'Firestore Not Ready',
+        description: 'Please wait a moment and try again.',
+      });
+      return;
     }
     if (!navigator.mediaDevices?.getUserMedia) {
-      toast({ variant: 'destructive', title: 'Not Supported', description: 'Your browser does not support microphone access.' });
+      toast({
+        variant: 'destructive',
+        title: 'Not Supported',
+        description: 'Your browser does not support microphone access.',
+      });
       setHasMicPermission(false);
       return;
     }
@@ -124,7 +143,8 @@ export function SensorView() {
       streamRef.current = stream;
       setHasMicPermission(true);
 
-      const context = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const context = new (window.AudioContext ||
+        (window as any).webkitAudioContext)();
       if (context.state === 'suspended') {
         await context.resume();
       }
@@ -134,57 +154,60 @@ export function SensorView() {
       analyserRef.current = context.createAnalyser();
       analyserRef.current.fftSize = 2048;
       source.connect(analyserRef.current);
-      
-      setIsMonitoring(true);
-      animationFrameRef.current = requestAnimationFrame(processAudio);
-      console.log("Monitoring started successfully.");
 
+      setIsMonitoring(true);
+      lastWriteTimeRef.current = 0; // Reset throttle timer
+      animationFrameRef.current = requestAnimationFrame(processAudio);
     } catch (err) {
       console.error('Error accessing microphone:', err);
       setHasMicPermission(false);
-      toast({ variant: 'destructive', title: 'Microphone Access Denied', description: 'Please enable microphone access in your browser settings.'});
+      toast({
+        variant: 'destructive',
+        title: 'Microphone Access Denied',
+        description:
+          'Please enable microphone access in your browser settings.',
+      });
     }
-  }, [processAudio, toast, db]);
+  }, [db, processAudio, toast]);
 
   const stopMonitoring = useCallback(() => {
-    console.log("Stopping monitoring...");
-
     if (animationFrameRef.current) {
       cancelAnimationFrame(animationFrameRef.current);
       animationFrameRef.current = null;
     }
 
     if (streamRef.current) {
-      streamRef.current.getTracks().forEach(track => track.stop());
+      streamRef.current.getTracks().forEach((track) => track.stop());
       streamRef.current = null;
     }
 
-    if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
-      audioContextRef.current.close().catch(e => console.error("Error closing AudioContext", e));
-      audioContextRef.current = null;
+    if (
+      audioContextRef.current &&
+      audioContextRef.current.state !== 'closed'
+    ) {
+      audioContextRef.current
+        .close()
+        .catch((e) => console.error('Error closing AudioContext', e));
     }
+    audioContextRef.current = null;
 
     if (db && selectedDevice) {
-        const deviceRef = doc(db, 'devices', selectedDevice);
-        setDoc(deviceRef, { status: 'offline', decibel: 0 }, { merge: true })
-        .catch(error => {
-            console.error("Error setting device to offline:", error);
-        });
+      setDoc(doc(db, 'devices', selectedDevice), { status: 'offline', decibel: 0 }, { merge: true })
+      .catch((error) => {
+        console.error('Error setting device to offline:', error);
+      });
     }
 
     setIsMonitoring(false);
     setDecibels(0);
     setIsOnline(false);
-    valueHistoryRef.current = [];
   }, [db, selectedDevice]);
 
   useEffect(() => {
-    // Cleanup on component unmount
     return () => {
       stopMonitoring();
     };
   }, [stopMonitoring]);
-
 
   return (
     <div className="flex justify-center items-center p-4 h-full">
@@ -192,12 +215,13 @@ export function SensorView() {
         <CardHeader>
           <CardTitle>Sensor Emulator</CardTitle>
           <CardDescription>
-            Use your device's microphone to simulate a remote noise sensor and send data to Firestore.
+            Use your device's microphone to simulate a remote noise sensor and
+            send data to Firestore.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
           {hasMicPermission === false && (
-             <Alert variant="destructive">
+            <Alert variant="destructive">
               <MicOff className="h-4 w-4" />
               <AlertTitle>Microphone Access Required</AlertTitle>
               <AlertDescription>
@@ -225,31 +249,44 @@ export function SensorView() {
               </SelectContent>
             </Select>
           </div>
-          
+
           <div className="flex items-center justify-center p-8 bg-muted/50 rounded-lg">
-             <div className="text-center">
-                <div className={cn(
-                    "text-7xl font-bold font-headline tabular-nums",
-                    isMonitoring ? 'text-primary neon-glow' : 'text-muted-foreground'
-                )}>
-                    {Math.round(decibels)}
-                </div>
-                <div className="text-lg font-medium text-muted-foreground">dB</div>
-             </div>
+            <div className="text-center">
+              <div
+                className={cn(
+                  'text-7xl font-bold font-headline tabular-nums',
+                  isMonitoring
+                    ? 'text-primary neon-glow'
+                    : 'text-muted-foreground'
+                )}
+              >
+                {Math.round(decibels)}
+              </div>
+              <div className="text-lg font-medium text-muted-foreground">
+                dB
+              </div>
+            </div>
           </div>
-          
+
           <div className="flex justify-between items-center text-sm text-muted-foreground">
             {isMonitoring ? (
-                <Badge variant="default" className="bg-primary/20 text-primary animate-pulse">Monitoring Active</Badge>
+              <Badge
+                variant="default"
+                className="bg-primary/20 text-primary animate-pulse"
+              >
+                Monitoring Active
+              </Badge>
             ) : (
-                <Badge variant="secondary">Status: Stopped</Badge>
+              <Badge variant="secondary">Status: Stopped</Badge>
             )}
-            <div className={cn(
-                "flex items-center gap-2",
+            <div
+              className={cn(
+                'flex items-center gap-2',
                 isOnline ? 'text-green-400' : 'text-red-400'
-            )}>
-                <Wifi size={16} />
-                <span>{isOnline ? 'Online' : 'Offline'}</span>
+              )}
+            >
+              <Wifi size={16} />
+              <span>{isOnline ? 'Online' : 'Offline'}</span>
             </div>
           </div>
         </CardContent>
@@ -259,7 +296,12 @@ export function SensorView() {
               <Radio className="mr-2" /> Start Monitoring
             </Button>
           ) : (
-            <Button onClick={stopMonitoring} size="lg" variant="destructive" className="w-full">
+            <Button
+              onClick={stopMonitoring}
+              size="lg"
+              variant="destructive"
+              className="w-full"
+            >
               <Square className="mr-2" /> Stop Monitoring
             </Button>
           )}
