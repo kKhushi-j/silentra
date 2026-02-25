@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useParams } from "next/navigation";
 import { doc, setDoc, serverTimestamp } from "firebase/firestore";
 import { db } from "@/lib/firebase";
@@ -10,16 +10,19 @@ export default function SensorPage() {
   const zone = params.zone as string;
 
   const [running, setRunning] = useState(false);
+  const intervalRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
-    let interval: any;
+    if (!zone) return;
 
     if (running) {
-      interval = setInterval(async () => {
+      console.log("🟢 Sensor STARTED for zone:", zone);
+
+      intervalRef.current = setInterval(async () => {
         const randomLevel = Math.floor(Math.random() * 100);
 
         console.log("🔥 Interval running");
-        console.log("Zone:", zone);
+        console.log("Attempting write to:", zone);
 
         try {
           await setDoc(doc(db, "sensors", zone), {
@@ -36,15 +39,31 @@ export default function SensorPage() {
     }
 
     return () => {
-      clearInterval(interval);
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+        console.log("🛑 Interval cleared");
+      }
     };
   }, [running, zone]);
 
   const stopSensor = async () => {
-    await setDoc(doc(db, "sensors", zone), {
-      status: "offline",
-      lastUpdated: serverTimestamp(),
-    }, { merge: true });
+    console.log("🔴 Stopping sensor...");
+
+    try {
+      await setDoc(
+        doc(db, "sensors", zone),
+        {
+          status: "offline",
+          lastUpdated: serverTimestamp(),
+        },
+        { merge: true }
+      );
+
+      console.log("✅ Stop write SUCCESS");
+    } catch (error) {
+      console.error("❌ Stop write FAILED:", error);
+    }
 
     setRunning(false);
   };
