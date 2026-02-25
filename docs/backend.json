@@ -17,9 +17,14 @@
         "zone": {
           "type": "string",
           "description": "The zone identifier for the device (e.g., 'Front Left')."
+        },
+        "status": {
+          "type": "string",
+          "description": "The online status of the sensor device.",
+          "enum": ["online", "offline"]
         }
       },
-      "required": ["decibel", "timestamp", "zone"]
+      "required": ["decibel", "timestamp", "zone", "status"]
     }
   },
   "auth": {

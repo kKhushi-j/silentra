@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import Image from 'next/image';
 import { collection, doc, onSnapshot, Timestamp } from 'firebase/firestore';
 import { useFirestore } from '@/firebase';
@@ -16,7 +16,8 @@ import { Input } from '@/components/ui/input';
 import { PlaceHolderImages } from '@/lib/placeholder-images';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
-import { Upload, Wifi, WifiOff } from 'lucide-react';
+import { Upload, Wifi, WifiOff, Zap, BarChart, Rss } from 'lucide-react';
+import { Skeleton } from '../ui/skeleton';
 
 const defaultImageUrl =
   PlaceHolderImages.find((img) => img.id === 'room-layout')?.imageUrl ||
@@ -42,13 +43,13 @@ type DeviceState = {
   zone: string;
   position: { top: string; left: string };
   decibel: number;
-  history: number[];
   classification: NoiseClassification;
   lastUpdate: number;
   isOnline: boolean;
 };
 
 const getClassification = (db: number): NoiseClassification => {
+  if (db <= 0) return 'Offline';
   if (db <= 40) return 'Silent';
   if (db <= 60) return 'Moderate';
   if (db <= 75) return 'Warning';
@@ -92,7 +93,6 @@ const initialDevices: Record<DeviceId, DeviceState> = {
     zone: 'Front Left',
     position: { top: '25%', left: '25%' },
     decibel: 0,
-    history: [],
     classification: 'Offline',
     lastUpdate: 0,
     isOnline: false,
@@ -102,7 +102,6 @@ const initialDevices: Record<DeviceId, DeviceState> = {
     zone: 'Front Right',
     position: { top: '25%', left: '75%' },
     decibel: 0,
-    history: [],
     classification: 'Offline',
     lastUpdate: 0,
     isOnline: false,
@@ -112,7 +111,6 @@ const initialDevices: Record<DeviceId, DeviceState> = {
     zone: 'Back Left',
     position: { top: '75%', left: '25%' },
     decibel: 0,
-    history: [],
     classification: 'Offline',
     lastUpdate: 0,
     isOnline: false,
@@ -122,7 +120,6 @@ const initialDevices: Record<DeviceId, DeviceState> = {
     zone: 'Back Right',
     position: { top: '75%', left: '75%' },
     decibel: 0,
-    history: [],
     classification: 'Offline',
     lastUpdate: 0,
     isOnline: false,
@@ -135,44 +132,56 @@ export function HeatmapView() {
   const [imageUrl, setImageUrl] = useState<string>(defaultImageUrl);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const db = useFirestore();
-
   const [devices, setDevices] =
     useState<Record<DeviceId, DeviceState>>(initialDevices);
+  const [isLoading, setIsLoading] = useState(true);
+
+  // Store history for smoothing
+  const historyRef = useRef<Record<DeviceId, number[]>>({Mic_A: [], Mic_B: [], Mic_C: [], Mic_D: []});
 
   useEffect(() => {
     if (!db) return;
+    setIsLoading(true);
 
     const unsubscribers = DEVICE_IDS.map((deviceId) => {
-      const docRef = doc(collection(db, 'devices'), deviceId);
+      const docRef = doc(db, 'devices', deviceId);
       return onSnapshot(docRef, (docSnap) => {
         if (docSnap.exists()) {
           const data = docSnap.data() as {
             decibel: number;
             timestamp: Timestamp;
-            zone: string;
+            status: 'online' | 'offline';
           };
+          
+          if (data.status === 'offline') {
+            setDevices(prev => ({
+              ...prev,
+              [deviceId]: { ...prev[deviceId], isOnline: false, decibel: 0, classification: 'Offline' }
+            }));
+            return;
+          }
 
-          setDevices((prevDevices) => {
-            const newHistory = [
-              ...(prevDevices[deviceId].history || []),
-              data.decibel,
-            ].slice(-5);
-            const smoothedDecibel =
-              newHistory.reduce((a, b) => a + b, 0) / newHistory.length;
+          const history = historyRef.current[deviceId];
+          history.push(data.decibel);
+          if (history.length > 5) history.shift();
 
-            return {
-              ...prevDevices,
-              [deviceId]: {
-                ...prevDevices[deviceId],
-                decibel: smoothedDecibel,
-                history: newHistory,
-                classification: getClassification(smoothedDecibel),
-                lastUpdate: data.timestamp.toMillis(),
-                isOnline: true,
-              },
-            };
-          });
+          const smoothedDecibel = history.reduce((a, b) => a + b, 0) / history.length;
+
+          setDevices((prevDevices) => ({
+            ...prevDevices,
+            [deviceId]: {
+              ...prevDevices[deviceId],
+              decibel: smoothedDecibel,
+              classification: getClassification(smoothedDecibel),
+              lastUpdate: data.timestamp.toMillis(),
+              isOnline: true,
+            },
+          }));
         }
+        if(isLoading) setIsLoading(false);
+      }, (error) => {
+        console.error(`Error listening to device ${deviceId}:`, error);
+        setIsLoading(false);
       });
     });
 
@@ -184,11 +193,7 @@ export function HeatmapView() {
         for (const deviceId of DEVICE_IDS) {
           const device = newDevices[deviceId as DeviceId];
           if (device.isOnline && now - device.lastUpdate > OFFLINE_THRESHOLD) {
-            newDevices[deviceId as DeviceId] = {
-              ...device,
-              isOnline: false,
-              classification: 'Offline',
-            };
+            newDevices[deviceId as DeviceId] = { ...device, isOnline: false, decibel: 0, classification: 'Offline' };
             changed = true;
           }
         }
@@ -200,90 +205,114 @@ export function HeatmapView() {
       unsubscribers.forEach((unsub) => unsub());
       clearInterval(interval);
     };
-  }, [db]);
+  }, [db, isLoading]);
 
   const handleImageUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (file) {
       const reader = new FileReader();
       reader.onload = (e) => {
-        if (e.target?.result) {
-          setImageUrl(e.target.result as string);
-        }
+        if (e.target?.result) setImageUrl(e.target.result as string);
       };
       reader.readAsDataURL(file);
     }
   };
 
-  const handleButtonClick = () => {
-    fileInputRef.current?.click();
-  };
+  const deviceArray = useMemo(() => Object.values(devices), [devices]);
+  
+  const onlineDevices = useMemo(() => deviceArray.filter(d => d.isOnline), [deviceArray]);
 
-  const deviceArray = Object.values(devices);
-  const highestDevice = deviceArray.reduce(
-    (max, device) => (device.decibel > max.decibel ? device : max),
-    deviceArray[0]
-  );
-  const allOnline = deviceArray.every((d) => d.isOnline);
+  const { highestDevice, averageNoise } = useMemo(() => {
+    if (onlineDevices.length === 0) return { highestDevice: null, averageNoise: 0 };
+    const highest = onlineDevices.reduce((max, device) => device.decibel > max.decibel ? device : max);
+    const avg = onlineDevices.reduce((sum, d) => sum + d.decibel, 0) / onlineDevices.length;
+    return { highestDevice: highest, averageNoise: avg };
+  }, [onlineDevices]);
+  
+  const allOnline = useMemo(() => onlineDevices.length === DEVICE_IDS.length, [onlineDevices]);
+
+  if (isLoading) {
+    return (
+       <div className="grid gap-6 lg:grid-cols-3">
+        <div className="lg:col-span-2">
+          <Card>
+            <CardHeader><Skeleton className="h-8 w-1/2" /></CardHeader>
+            <CardContent><Skeleton className="aspect-[4/3] w-full" /></CardContent>
+          </Card>
+        </div>
+         <div>
+           <Card>
+             <CardHeader><Skeleton className="h-8 w-3/4" /></CardHeader>
+             <CardContent className="space-y-4">
+               <Skeleton className="h-10 w-full" />
+               <Skeleton className="h-24 w-full" />
+             </CardContent>
+           </Card>
+         </div>
+       </div>
+    );
+  }
 
   return (
     <div className="grid gap-6 lg:grid-cols-3">
       <div className="lg:col-span-2">
         <Card className="overflow-hidden">
           <CardHeader>
-            <div className="flex justify-between items-start">
-              <div>
-                <CardTitle>Real-time Noise Heatmap</CardTitle>
-                <CardDescription>
-                  Live intensity from 4 microphone sensors.
-                </CardDescription>
-              </div>
-              <Badge
-                variant={allOnline ? 'default' : 'destructive'}
-                className="flex items-center gap-2"
-              >
-                {allOnline ? (
-                  <Wifi className="h-4 w-4" />
-                ) : (
-                  <WifiOff className="h-4 w-4" />
-                )}
-                {allOnline ? 'All Devices Online' : 'Device Offline'}
-              </Badge>
-            </div>
+            <CardTitle>Real-time Noise Heatmap</CardTitle>
+            <CardDescription>
+              Live intensity from microphone sensors in the environment.
+            </CardDescription>
           </CardHeader>
           <CardContent>
+            {/* Global Summary Panel */}
+            <Card className="mb-4 bg-muted/30">
+                <CardHeader className='p-4'>
+                    <div className="flex justify-between items-center">
+                        <CardTitle className="text-base">Room Status</CardTitle>
+                        <Badge variant={allOnline ? 'default' : 'destructive'} className="flex items-center gap-2">
+                            {allOnline ? <Wifi className="h-4 w-4" /> : <WifiOff className="h-4 w-4" />}
+                            {allOnline ? 'All Devices Online' : 'Device Offline'}
+                        </Badge>
+                    </div>
+                </CardHeader>
+                <CardContent className="p-4 pt-0 grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
+                    <div className='flex items-center gap-3'>
+                        <Zap className="text-primary neon-glow-accent" />
+                        <div>
+                            <p className="font-medium">Peak Intensity</p>
+                            <p className="text-muted-foreground font-bold">{Math.round(highestDevice?.decibel || 0)} dB ({highestDevice?.zone || 'N/A'})</p>
+                        </div>
+                    </div>
+                     <div className='flex items-center gap-3'>
+                        <BarChart className="text-primary" />
+                        <div>
+                            <p className="font-medium">Average Noise</p>
+                            <p className="text-muted-foreground font-bold">{Math.round(averageNoise)} dB</p>
+                        </div>
+                    </div>
+                </CardContent>
+            </Card>
+
             <div className="relative aspect-[4/3] w-full rounded-md overflow-hidden bg-muted">
-              <Image
-                src={imageUrl}
-                alt="Room Layout"
-                fill
-                className="object-contain"
-                data-ai-hint={defaultImageHint}
-              />
+              <Image src={imageUrl} alt="Room Layout" fill className="object-contain" data-ai-hint={defaultImageHint}/>
               {deviceArray.map((device) => {
-                const isHighest =
-                  device.id === highestDevice.id && highestDevice.decibel > 0;
+                const isHighest = highestDevice && device.id === highestDevice.id && device.isOnline;
                 const colorConfig = CLASSIFICATION_COLORS[device.classification];
                 const size = 60 + device.decibel;
 
                 return (
                   <div
                     key={device.id}
-                    className="absolute rounded-full transition-all duration-1000 ease-in-out flex items-center justify-center"
+                    className="absolute rounded-full transition-all duration-300 ease-out flex items-center justify-center"
                     style={{
                       top: device.position.top,
                       left: device.position.left,
                       width: `${size}px`,
                       height: `${size}px`,
-                      transform: `translate(-50%, -50%) scale(${
-                        isHighest ? 1.1 : 1
-                      })`,
+                      transform: `translate(-50%, -50%) scale(${isHighest ? 1.15 : 1})`,
                       backgroundColor: colorConfig.base,
                       boxShadow: colorConfig.shadow,
-                      animation:
-                        device.classification === 'Emergency' || isHighest
-                          ? 'pulse 1.5s infinite'
-                          : 'none',
+                      animation: (device.classification === 'Emergency' || device.classification === 'Critical') && device.isOnline ? 'pulse 1.5s infinite' : 'none',
                     }}
                   >
                     <div className="text-center text-white font-bold">
@@ -291,11 +320,11 @@ export function HeatmapView() {
                         {Math.round(device.decibel)}
                         <span className="text-xs">dB</span>
                       </div>
+                      <Badge variant="secondary" className="mt-1 text-[10px] px-1.5 py-0 h-auto bg-black/30 backdrop-blur-sm">
+                          {device.classification}
+                      </Badge>
                       {isHighest && (
-                        <Badge
-                          variant="secondary"
-                          className="mt-1 text-xs px-1 py-0 h-auto animate-pulse"
-                        >
+                        <Badge variant="destructive" className="mt-1 text-[10px] px-1.5 py-0 h-auto animate-pulse">
                           Highest
                         </Badge>
                       )}
@@ -316,35 +345,14 @@ export function HeatmapView() {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <Input
-              type="file"
-              accept="image/*"
-              onChange={handleImageUpload}
-              ref={fileInputRef}
-              className="hidden"
-            />
-            <Button onClick={handleButtonClick} className="w-full">
+            <Input type="file" accept="image/*" onChange={handleImageUpload} ref={fileInputRef} className="hidden" />
+            <Button onClick={() => fileInputRef.current?.click()} className="w-full">
               <Upload className="mr-2 h-4 w-4" />
               Upload Layout
             </Button>
-            <Card>
-              <CardHeader className="p-4">
-                <CardTitle className="text-base">
-                  Overall Highest Reading
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="p-4 pt-0">
-                <div className="text-3xl font-bold text-primary neon-glow">
-                  {Math.round(highestDevice?.decibel || 0)} dB
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  from {highestDevice?.zone || 'N/A'}
-                </p>
-              </CardContent>
-            </Card>
-            <p className="text-xs text-muted-foreground">
+            <p className="text-xs text-muted-foreground pt-4">
               This heatmap visualizes real-time data from your Firestore
-              &apos;devices&apos; collection.
+              &apos;devices&apos; collection. Use the &apos;Sensor&apos; page to emulate a device.
             </p>
           </CardContent>
         </Card>

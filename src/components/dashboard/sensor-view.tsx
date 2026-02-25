@@ -20,10 +20,11 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
-import { Mic, MicOff, Square, Radio, Wifi } from 'lucide-react';
+import { MicOff, Radio, Square, Wifi } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { Alert, AlertDescription, AlertTitle } from '../ui/alert';
 import { cn } from '@/lib/utils';
+import { Badge } from '../ui/badge';
 
 const DEVICE_IDS = [
   { id: 'Mic_A', label: 'Front Left' },
@@ -40,81 +41,112 @@ export function SensorView() {
   const [selectedDevice, setSelectedDevice] = useState<DeviceId>('Mic_A');
   const [hasMicPermission, setHasMicPermission] = useState<boolean | null>(null);
   const [isOnline, setIsOnline] = useState(false);
-
+  
   const db = useFirestore();
   const { toast } = useToast();
 
   const audioContextRef = useRef<AudioContext | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
-  const dataArrayRef = useRef<Uint8Array | null>(null);
   const animationFrameId = useRef<number | null>(null);
-  const firestoreIntervalId = useRef<NodeJS.Timeout | null>(null);
+  const lastWriteTimeRef = useRef<number>(0);
+  const valueHistoryRef = useRef<number[]>([]);
 
-  const stopMonitoring = useCallback(() => {
-    if (animationFrameId.current) {
-      cancelAnimationFrame(animationFrameId.current);
-    }
-    if (firestoreIntervalId.current) {
-      clearInterval(firestoreIntervalId.current);
-    }
-
-    streamRef.current?.getTracks().forEach((track) => track.stop());
-    if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
-      audioContextRef.current.close();
-    }
-
-    streamRef.current = null;
-    audioContextRef.current = null;
-    setIsMonitoring(false);
-    setDecibels(0);
-    setIsOnline(false);
-  }, []);
-
-  const sendDataToFirestore = useCallback(async (currentDecibels: number) => {
+  const sendDataToFirestore = useCallback(async (currentDecibels: number, status: 'online' | 'offline' = 'online') => {
     if (!db || !selectedDevice) return;
     try {
       const deviceRef = doc(db, 'devices', selectedDevice);
       await setDoc(deviceRef, {
-        decibel: currentDecibels,
+        decibel: status === 'online' ? currentDecibels : 0,
         timestamp: serverTimestamp(),
         zone: DEVICE_IDS.find(d => d.id === selectedDevice)?.label,
+        status: status,
       });
-      setIsOnline(true);
+      setIsOnline(status === 'online');
     } catch (error) {
       console.error("Error writing to Firestore: ", error);
       setIsOnline(false);
-      toast({
-        variant: 'destructive',
-        title: 'Firestore Error',
-        description: 'Could not send data to server.',
-      });
+      if (status === 'online') {
+        toast({
+          variant: 'destructive',
+          title: 'Firestore Error',
+          description: 'Could not send data to server.',
+        });
+      }
     }
   }, [db, selectedDevice, toast]);
 
-  const processAudio = useCallback(() => {
-    if (analyserRef.current && dataArrayRef.current) {
-      analyserRef.current.getByteFrequencyData(dataArrayRef.current);
-      let sum = 0;
-      for (const value of dataArrayRef.current) {
-        sum += value;
-      }
-      const average = sum / dataArrayRef.current.length;
-      const db = 20 + (average / 255) * 100;
-      const clampedDb = Math.min(Math.max(db, 0), 120);
-      setDecibels(clampedDb);
-      animationFrameId.current = requestAnimationFrame(processAudio);
+  const stopMonitoring = useCallback(async () => {
+    if (animationFrameId.current) {
+      cancelAnimationFrame(animationFrameId.current);
+      animationFrameId.current = null;
     }
-  }, []);
+
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((track) => track.stop());
+      streamRef.current = null;
+    }
+    
+    if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
+      await audioContextRef.current.close();
+      audioContextRef.current = null;
+    }
+
+    if (isMonitoring) {
+        await sendDataToFirestore(0, 'offline');
+    }
+
+    setIsMonitoring(false);
+    setDecibels(0);
+    setIsOnline(false);
+    valueHistoryRef.current = [];
+
+  }, [isMonitoring, sendDataToFirestore]);
+
+  const processAudio = useCallback(() => {
+    if (!analyserRef.current) {
+        stopMonitoring();
+        return;
+    }
+    
+    const dataArray = new Uint8Array(analyserRef.current.fftSize);
+    analyserRef.current.getByteTimeDomainData(dataArray);
+
+    let sumSquares = 0.0;
+    for (const amplitude of dataArray) {
+        const normalizedAmplitude = (amplitude / 128.0) - 1.0; // Normalize to -1.0 to 1.0
+        sumSquares += normalizedAmplitude * normalizedAmplitude;
+    }
+    const rms = Math.sqrt(sumSquares / dataArray.length);
+    
+    // Approximate dB value, calibrated for typical room noise
+    let db = 20 * Math.log10(rms) + 100; // Offset to bring into a positive and reasonable range
+    db = Math.max(0, Math.min(120, db));
+
+    // Smoothing with last 5 values
+    valueHistoryRef.current.push(db);
+    if (valueHistoryRef.current.length > 5) {
+        valueHistoryRef.current.shift();
+    }
+    const smoothedDb = valueHistoryRef.current.reduce((a, b) => a + b, 0) / valueHistoryRef.current.length;
+
+    setDecibels(smoothedDb);
+    
+    const now = Date.now();
+    if (now - lastWriteTimeRef.current > 1000) {
+        sendDataToFirestore(smoothedDb);
+        lastWriteTimeRef.current = now;
+    }
+
+    animationFrameId.current = requestAnimationFrame(processAudio);
+  }, [sendDataToFirestore, stopMonitoring]);
 
 
   const startMonitoring = useCallback(async () => {
+    await stopMonitoring(); // Ensure everything is clean before starting
+
     if (!navigator.mediaDevices?.getUserMedia) {
-      toast({
-        variant: 'destructive',
-        title: 'Not Supported',
-        description: 'Your browser does not support microphone access.',
-      });
+      toast({ variant: 'destructive', title: 'Not Supported', description: 'Your browser does not support microphone access.' });
       setHasMicPermission(false);
       return;
     }
@@ -126,38 +158,22 @@ export function SensorView() {
       const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
       audioContextRef.current = audioContext;
 
-      const analyser = audioContext.createAnalyser();
-      analyser.minDecibels = -90;
-      analyser.maxDecibels = -10;
-      analyser.smoothingTimeConstant = 0.85;
-      analyserRef.current = analyser;
+      analyserRef.current = audioContext.createAnalyser();
+      analyserRef.current.fftSize = 2048;
 
       const source = audioContext.createMediaStreamSource(stream);
-      source.connect(analyser);
-
-      dataArrayRef.current = new Uint8Array(analyser.frequencyBinCount);
+      source.connect(analyserRef.current);
       
       setIsMonitoring(true);
-      processAudio();
-
-      if (firestoreIntervalId.current) clearInterval(firestoreIntervalId.current);
-      firestoreIntervalId.current = setInterval(() => {
-        setDecibels(currentDb => {
-          sendDataToFirestore(currentDb);
-          return currentDb;
-        });
-      }, 1000);
+      lastWriteTimeRef.current = 0; // Reset write time to send data immediately
+      animationFrameId.current = requestAnimationFrame(processAudio);
 
     } catch (err) {
       console.error('Error accessing microphone:', err);
       setHasMicPermission(false);
-      toast({
-        variant: 'destructive',
-        title: 'Microphone Access Denied',
-        description: 'Please enable microphone access in your browser settings.',
-      });
+      toast({ variant: 'destructive', title: 'Microphone Access Denied', description: 'Please enable microphone access in your browser settings.'});
     }
-  }, [processAudio, sendDataToFirestore, toast]);
+  }, [processAudio, stopMonitoring, toast]);
 
   useEffect(() => {
     return () => {
@@ -219,7 +235,11 @@ export function SensorView() {
           </div>
           
           <div className="flex justify-between items-center text-sm text-muted-foreground">
-            <span>Status: {isMonitoring ? 'Monitoring' : 'Stopped'}</span>
+            {isMonitoring ? (
+                <Badge variant="default" className="bg-primary/20 text-primary animate-pulse">Monitoring Active</Badge>
+            ) : (
+                <Badge variant="secondary">Status: Stopped</Badge>
+            )}
             <div className={cn(
                 "flex items-center gap-2",
                 isOnline ? 'text-green-400' : 'text-red-400'
