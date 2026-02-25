@@ -89,7 +89,7 @@ const CLASSIFICATION_COLORS: Record<
 const initialDevices: Record<DeviceId, DeviceState> = {
   Mic_A: {
     id: 'Mic_A',
-    zone: 'Top Left',
+    zone: 'Front Left',
     position: { top: '25%', left: '25%' },
     decibel: 0,
     history: [],
@@ -99,7 +99,7 @@ const initialDevices: Record<DeviceId, DeviceState> = {
   },
   Mic_B: {
     id: 'Mic_B',
-    zone: 'Top Right',
+    zone: 'Front Right',
     position: { top: '25%', left: '75%' },
     decibel: 0,
     history: [],
@@ -109,7 +109,7 @@ const initialDevices: Record<DeviceId, DeviceState> = {
   },
   Mic_C: {
     id: 'Mic_C',
-    zone: 'Bottom Left',
+    zone: 'Back Left',
     position: { top: '75%', left: '25%' },
     decibel: 0,
     history: [],
@@ -119,7 +119,7 @@ const initialDevices: Record<DeviceId, DeviceState> = {
   },
   Mic_D: {
     id: 'Mic_D',
-    zone: 'Bottom Right',
+    zone: 'Back Right',
     position: { top: '75%', left: '75%' },
     decibel: 0,
     history: [],

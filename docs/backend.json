@@ -16,7 +16,7 @@
         },
         "zone": {
           "type": "string",
-          "description": "The zone identifier for the device (e.g., 'Top Left')."
+          "description": "The zone identifier for the device (e.g., 'Front Left')."
         }
       },
       "required": ["decibel", "timestamp", "zone"]
