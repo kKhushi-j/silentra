@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import { useState, useRef } from "react";
 import { useParams } from "next/navigation";
 import { doc, setDoc, serverTimestamp } from "firebase/firestore";
 import { db } from "@/lib/firebase";
@@ -10,45 +10,38 @@ export default function SensorPage() {
   const zone = params.zone as string;
 
   const [running, setRunning] = useState(false);
-  const intervalRef = useRef<NodeJS.Timeout | null>(null);
+  const intervalRef = useRef<any>(null);
 
-  useEffect(() => {
-    if (!zone) return;
+  const startSensor = () => {
+    if (intervalRef.current) return; // prevent duplicate intervals
 
-    if (running) {
-      console.log("🟢 Sensor STARTED for zone:", zone);
+    console.log("🟢 Starting sensor:", zone);
+    setRunning(true);
 
-      intervalRef.current = setInterval(async () => {
-        const randomLevel = Math.floor(Math.random() * 100);
+    intervalRef.current = setInterval(async () => {
+      const randomLevel = Math.floor(Math.random() * 100);
 
-        console.log("🔥 Interval running");
-        console.log("Attempting write to:", zone);
+      console.log("🔥 Writing:", randomLevel);
 
-        try {
-          await setDoc(doc(db, "sensors", zone), {
-            level: randomLevel,
-            status: "online",
-            lastUpdated: serverTimestamp(),
-          });
-
-          console.log("✅ Write SUCCESS");
-        } catch (error) {
-          console.error("❌ Write FAILED:", error);
-        }
-      }, 1000);
-    }
-
-    return () => {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
-        intervalRef.current = null;
-        console.log("🛑 Interval cleared");
+      try {
+        await setDoc(doc(db, "sensors", zone), {
+          level: randomLevel,
+          status: "online",
+          lastUpdated: serverTimestamp(),
+        });
+      } catch (err) {
+        console.error("❌ Write error:", err);
       }
-    };
-  }, [running, zone]);
+    }, 1000);
+  };
 
   const stopSensor = async () => {
-    console.log("🔴 Stopping sensor...");
+    console.log("🔴 Stopping sensor:", zone);
+
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
+    }
 
     try {
       await setDoc(
@@ -59,10 +52,8 @@ export default function SensorPage() {
         },
         { merge: true }
       );
-
-      console.log("✅ Stop write SUCCESS");
-    } catch (error) {
-      console.error("❌ Stop write FAILED:", error);
+    } catch (err) {
+      console.error("❌ Stop write error:", err);
     }
 
     setRunning(false);
@@ -74,7 +65,7 @@ export default function SensorPage() {
 
       {!running ? (
         <button
-          onClick={() => setRunning(true)}
+          onClick={startSensor}
           className="bg-green-600 px-6 py-3 rounded text-white"
         >
           Start Sensor
