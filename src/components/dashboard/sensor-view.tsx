@@ -1,7 +1,7 @@
 'use client';
 
-import { useState, useEffect, useRef, useCallback } from 'react';
-import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { useState, useEffect, useRef } from 'react';
+import { doc, setDoc } from 'firebase/firestore';
 import { useFirestore } from '@/firebase';
 import {
   Card,
@@ -35,13 +35,25 @@ const DEVICE_IDS = [
 
 type DeviceId = 'Mic_A' | 'Mic_B' | 'Mic_C' | 'Mic_D';
 
+const calculateDb = (dataArray: Uint8Array): number => {
+    let sumSquares = 0.0;
+    for (const amplitude of dataArray) {
+        const normalizedAmplitude = amplitude / 128.0 - 1.0;
+        sumSquares += normalizedAmplitude * normalizedAmplitude;
+    }
+    const rms = Math.sqrt(sumSquares / dataArray.length);
+    const effectiveRms = Math.max(rms, 0.00001);
+    let dbValue = 20 * Math.log10(effectiveRms) + 94;
+    dbValue = Math.max(20, Math.min(120, dbValue));
+    return dbValue;
+};
+
+
 export function SensorView() {
   const [isMonitoring, setIsMonitoring] = useState(false);
   const [decibels, setDecibels] = useState(0);
   const [selectedDevice, setSelectedDevice] = useState<DeviceId>('Mic_A');
-  const [hasMicPermission, setHasMicPermission] = useState<boolean | null>(
-    null
-  );
+  const [hasMicPermission, setHasMicPermission] = useState<boolean | null>(null);
   const [isOnline, setIsOnline] = useState(false);
 
   const db = useFirestore();
@@ -50,159 +62,125 @@ export function SensorView() {
   const audioContextRef = useRef<AudioContext | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
-  const animationFrameRef = useRef<number | null>(null);
+  const dataArrayRef = useRef<Uint8Array | null>(null);
+  const monitoringRef = useRef(false);
 
-  const selectedDeviceRef = useRef(selectedDevice);
-  useEffect(() => {
-    selectedDeviceRef.current = selectedDevice;
-  }, [selectedDevice]);
+  const getCurrentDecibelLevel = (): number => {
+      if (!analyserRef.current || !dataArrayRef.current) {
+          return 0;
+      }
+      analyserRef.current.getByteTimeDomainData(dataArrayRef.current);
+      return calculateDb(dataArrayRef.current);
+  }
 
-  const dbRef = useRef(db);
-  useEffect(() => {
-    dbRef.current = db;
-  }, [db]);
-  
-  const isOnlineRef = useRef(isOnline);
-  useEffect(() => {
-    isOnlineRef.current = isOnline;
-  }, [isOnline]);
+  const startMonitoring = async () => {
+      if (monitoringRef.current) return;
 
-  const writeToFirestore = useCallback(async (dbLevel: number) => {
-    const currentDb = dbRef.current;
-    const deviceId = selectedDeviceRef.current;
-    
-    console.log("Selected Sensor ID:", deviceId);
-  
-    if (!currentDb) {
-      console.error("DB is undefined!");
-      return;
-    }
-  
-    try {
-      console.log("Writing to Firestore:", deviceId);
-      const deviceRef = doc(currentDb, "devices", deviceId);
-  
-      await setDoc(deviceRef, {
-        level: Math.round(dbLevel),
-        status: "online",
-        lastUpdated: new Date().toISOString()
-      }, { merge: true });
-  
-      console.log("Write success");
-      if (!isOnlineRef.current) setIsOnline(true);
-    } catch (error) {
-      console.error("Firestore ERROR:", error);
-      if (isOnlineRef.current) setIsOnline(false);
-    }
-  }, []);
-
-
-  const startMonitoring = useCallback(async () => {
-    if (!navigator.mediaDevices?.getUserMedia) {
-      toast({
-        variant: 'destructive',
-        title: 'Not Supported',
-        description: 'Your browser does not support microphone access.',
-      });
-      setHasMicPermission(false);
-      return;
-    }
-
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      streamRef.current = stream;
-      setHasMicPermission(true);
-
-      const context = new (window.AudioContext || (window as any).webkitAudioContext)();
-      if (context.state === 'suspended') await context.resume();
-      audioContextRef.current = context;
-
-      const source = context.createMediaStreamSource(stream);
-      analyserRef.current = context.createAnalyser();
-      analyserRef.current.fftSize = 2048;
-      source.connect(analyserRef.current);
+      if (!navigator.mediaDevices?.getUserMedia) {
+          toast({ variant: 'destructive', title: 'Not Supported', description: 'Your browser does not support microphone access.' });
+          setHasMicPermission(false);
+          return;
+      }
       
+      try {
+          const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          streamRef.current = stream;
+          setHasMicPermission(true);
+
+          const context = new (window.AudioContext || (window as any).webkitAudioContext)();
+          if (context.state === 'suspended') await context.resume();
+          audioContextRef.current = context;
+
+          const source = context.createMediaStreamSource(stream);
+          analyserRef.current = context.createAnalyser();
+          analyserRef.current.fftSize = 2048;
+          source.connect(analyserRef.current);
+          dataArrayRef.current = new Uint8Array(analyserRef.current.frequencyBinCount);
+      } catch (err) {
+          console.error('Error accessing microphone:', err);
+          setHasMicPermission(false);
+          toast({ variant: 'destructive', title: 'Microphone Access Denied', description: 'Please enable microphone access in your browser settings.' });
+          return;
+      }
+
+      monitoringRef.current = true;
       setIsMonitoring(true);
 
-      let lastWriteTime = 0;
-      const dataArray = new Uint8Array(analyserRef.current.frequencyBinCount);
+      const deviceRef = doc(db, "devices", selectedDevice);
 
-      const loop = () => {
-        if (!analyserRef.current) return;
-        
-        analyserRef.current.getByteTimeDomainData(dataArray);
+      const runLoop = async () => {
+          while (monitoringRef.current) {
+              const dbValue = getCurrentDecibelLevel();
+              setDecibels(dbValue);
 
-        let sumSquares = 0.0;
-        for (const amplitude of dataArray) {
-          const normalizedAmplitude = amplitude / 128.0 - 1.0;
-          sumSquares += normalizedAmplitude * normalizedAmplitude;
-        }
-        const rms = Math.sqrt(sumSquares / dataArray.length);
-        const effectiveRms = Math.max(rms, 0.00001);
-        let dbValue = 20 * Math.log10(effectiveRms) + 94;
-        dbValue = Math.max(20, Math.min(120, dbValue));
-
-        setDecibels(dbValue);
-
-        const now = Date.now();
-        if (now - lastWriteTime > 1000) {
-          lastWriteTime = now;
-          writeToFirestore(dbValue);
-        }
-
-        animationFrameRef.current = requestAnimationFrame(loop);
+              try {
+                  await setDoc(deviceRef, {
+                      level: Math.round(dbValue),
+                      status: "online",
+                      lastUpdated: new Date().toISOString()
+                  }, { merge: true });
+                  
+                  if(!isOnline) setIsOnline(true);
+                  console.log("Write success");
+              } catch (error) {
+                  console.error("Firestore ERROR:", error);
+                  if(isOnline) setIsOnline(false);
+              }
+              
+              await new Promise(resolve => setTimeout(resolve, 1000));
+          }
       };
 
-      loop();
-    } catch (err) {
-      console.error('Error accessing microphone:', err);
-      setHasMicPermission(false);
+      runLoop();
+  };
+
+  const stopMonitoring = async () => {
+      if (!monitoringRef.current) return;
+      
+      monitoringRef.current = false;
       setIsMonitoring(false);
-      toast({
-        variant: 'destructive',
-        title: 'Microphone Access Denied',
-        description: 'Please enable microphone access in your browser settings.',
-      });
-    }
-  }, [toast, writeToFirestore]);
+      setIsOnline(false);
 
-  const stopMonitoring = useCallback(async () => {
-    if (animationFrameRef.current) {
-      cancelAnimationFrame(animationFrameRef.current);
-      animationFrameRef.current = null;
-    }
-
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach((track) => track.stop());
-      streamRef.current = null;
-    }
-
-    if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
-      await audioContextRef.current.close();
-    }
-    audioContextRef.current = null;
-    analyserRef.current = null;
-    
-    const currentDb = dbRef.current;
-    const deviceId = selectedDeviceRef.current;
-    if (currentDb && deviceId) {
-      try {
-        await setDoc(doc(currentDb, 'devices', deviceId), { status: 'offline' }, { merge: true });
-      } catch (error) {
-        console.error('Error setting device to offline:', error);
+      if (streamRef.current) {
+          streamRef.current.getTracks().forEach((track) => track.stop());
+          streamRef.current = null;
       }
-    }
+      if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
+          await audioContextRef.current.close();
+          audioContextRef.current = null;
+      }
+      analyserRef.current = null;
+      dataArrayRef.current = null;
+      setDecibels(0);
 
-    setIsMonitoring(false);
-    setDecibels(0);
-    setIsOnline(false);
-  }, []);
-
+      const deviceRef = doc(db, "devices", selectedDevice);
+      try {
+          await setDoc(deviceRef, {
+              status: "offline",
+              level: 0,
+              lastUpdated: new Date().toISOString()
+          }, { merge: true });
+          console.log("Stopped and marked offline");
+      } catch (error) {
+          console.error("Stop ERROR:", error);
+      }
+  };
+  
   useEffect(() => {
+    // This is a critical cleanup effect.
+    // It ensures that if the component unmounts (e.g., user navigates away),
+    // we stop monitoring to prevent memory leaks and unnecessary background processing.
     return () => {
-      stopMonitoring();
+        if (monitoringRef.current) {
+            stopMonitoring();
+        }
     };
-  }, [stopMonitoring]);
+    // The empty dependency array [] means this effect runs only once on mount
+    // and its cleanup function runs only once on unmount.
+    // We are disabling the lint rule because stopMonitoring is not a stable function
+    // but we only want this to run on unmount anyway.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <div className="flex justify-center items-center p-4 h-full">
