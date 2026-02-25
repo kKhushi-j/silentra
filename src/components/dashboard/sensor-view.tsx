@@ -51,83 +51,55 @@ export function SensorView() {
   const streamRef = useRef<MediaStream | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const animationFrameRef = useRef<number | null>(null);
-  const lastWriteTimeRef = useRef<number>(0);
 
-  // Refs for values used in the animation loop to avoid stale closures
-  const dbRef = useRef(db);
-  useEffect(() => {
-    dbRef.current = db;
-  }, [db]);
-  
   const selectedDeviceRef = useRef(selectedDevice);
   useEffect(() => {
     selectedDeviceRef.current = selectedDevice;
   }, [selectedDevice]);
 
-  const processAudio = useCallback(() => {
-    if (!analyserRef.current) {
-      animationFrameRef.current = null;
+  const dbRef = useRef(db);
+  useEffect(() => {
+    dbRef.current = db;
+  }, [db]);
+  
+  const isOnlineRef = useRef(isOnline);
+  useEffect(() => {
+    isOnlineRef.current = isOnline;
+  }, [isOnline]);
+
+  const writeToFirestore = useCallback(async (dbLevel: number) => {
+    const currentDb = dbRef.current;
+    const deviceId = selectedDeviceRef.current;
+    const selectedZoneLabel = DEVICE_IDS.find(d => d.id === deviceId)?.label || 'Unknown';
+    
+    console.log("DB instance:", currentDb);
+    if (!currentDb) {
+      console.error("DB is undefined!");
       return;
     }
-
-    const dataArray = new Uint8Array(analyserRef.current.fftSize);
-    analyserRef.current.getByteTimeDomainData(dataArray);
-
-    let sumSquares = 0.0;
-    for (const amplitude of dataArray) {
-      const normalizedAmplitude = amplitude / 128.0 - 1.0;
-      sumSquares += normalizedAmplitude * normalizedAmplitude;
+  
+    try {
+      console.log("Writing to Firestore:", deviceId);
+      const ref = doc(currentDb, "devices", deviceId);
+      console.log("Document ref:", ref);
+  
+      await setDoc(ref, {
+        decibel: Math.round(dbLevel),
+        timestamp: serverTimestamp(),
+        status: "online",
+        zone: selectedZoneLabel
+      });
+  
+      console.log("Write success");
+      if (!isOnlineRef.current) setIsOnline(true);
+    } catch (error) {
+      console.error("Firestore ERROR:", error);
+      if (isOnlineRef.current) setIsOnline(false);
     }
-    const rms = Math.sqrt(sumSquares / dataArray.length);
-    let dbValue = 20 * Math.log10(rms) + 94;
-    dbValue = Math.max(20, Math.min(120, dbValue));
-
-    setDecibels(dbValue);
-
-    const now = Date.now();
-    if (now - lastWriteTimeRef.current > 1000) {
-      lastWriteTimeRef.current = now;
-
-      const currentDb = dbRef.current;
-      const currentDeviceId = selectedDeviceRef.current;
-
-      if (currentDb && currentDeviceId) {
-        const selectedZone =
-          DEVICE_IDS.find((d) => d.id === currentDeviceId)?.label || 'Unknown';
-        
-        console.log("Writing to Firestore:", currentDeviceId);
-        setDoc(
-          doc(currentDb, 'devices', currentDeviceId),
-          {
-            decibel: Math.round(dbValue),
-            timestamp: serverTimestamp(),
-            status: 'online',
-            zone: selectedZone,
-          },
-          { merge: true }
-        )
-        .then(() => {
-          console.log("Write success");
-          setIsOnline(true);
-        })
-        .catch((error) => {
-          console.error("Firestore ERROR:", error);
-        });
-      }
-    }
-
-    animationFrameRef.current = requestAnimationFrame(processAudio);
   }, []);
 
+
   const startMonitoring = useCallback(async () => {
-    if (!db) {
-      toast({
-        variant: 'destructive',
-        title: 'Firestore Not Ready',
-        description: 'Please wait a moment and try again.',
-      });
-      return;
-    }
     if (!navigator.mediaDevices?.getUserMedia) {
       toast({
         variant: 'destructive',
@@ -143,34 +115,60 @@ export function SensorView() {
       streamRef.current = stream;
       setHasMicPermission(true);
 
-      const context = new (window.AudioContext ||
-        (window as any).webkitAudioContext)();
-      if (context.state === 'suspended') {
-        await context.resume();
-      }
+      const context = new (window.AudioContext || (window as any).webkitAudioContext)();
+      if (context.state === 'suspended') await context.resume();
       audioContextRef.current = context;
 
       const source = context.createMediaStreamSource(stream);
       analyserRef.current = context.createAnalyser();
       analyserRef.current.fftSize = 2048;
       source.connect(analyserRef.current);
-
+      
       setIsMonitoring(true);
-      lastWriteTimeRef.current = 0; // Reset throttle timer
-      animationFrameRef.current = requestAnimationFrame(processAudio);
+
+      let lastWriteTime = 0;
+      const dataArray = new Uint8Array(analyserRef.current.frequencyBinCount);
+
+      const loop = () => {
+        if (!analyserRef.current) return;
+        
+        analyserRef.current.getByteTimeDomainData(dataArray);
+
+        let sumSquares = 0.0;
+        for (const amplitude of dataArray) {
+          const normalizedAmplitude = amplitude / 128.0 - 1.0;
+          sumSquares += normalizedAmplitude * normalizedAmplitude;
+        }
+        const rms = Math.sqrt(sumSquares / dataArray.length);
+        const effectiveRms = Math.max(rms, 0.00001);
+        let dbValue = 20 * Math.log10(effectiveRms) + 94;
+        dbValue = Math.max(20, Math.min(120, dbValue));
+
+        setDecibels(dbValue);
+
+        const now = Date.now();
+        if (now - lastWriteTime > 1000) {
+          lastWriteTime = now;
+          writeToFirestore(dbValue);
+        }
+
+        animationFrameRef.current = requestAnimationFrame(loop);
+      };
+
+      loop();
     } catch (err) {
       console.error('Error accessing microphone:', err);
       setHasMicPermission(false);
+      setIsMonitoring(false);
       toast({
         variant: 'destructive',
         title: 'Microphone Access Denied',
-        description:
-          'Please enable microphone access in your browser settings.',
+        description: 'Please enable microphone access in your browser settings.',
       });
     }
-  }, [db, processAudio, toast]);
+  }, [toast, writeToFirestore]);
 
-  const stopMonitoring = useCallback(() => {
+  const stopMonitoring = useCallback(async () => {
     if (animationFrameRef.current) {
       cancelAnimationFrame(animationFrameRef.current);
       animationFrameRef.current = null;
@@ -181,27 +179,26 @@ export function SensorView() {
       streamRef.current = null;
     }
 
-    if (
-      audioContextRef.current &&
-      audioContextRef.current.state !== 'closed'
-    ) {
-      audioContextRef.current
-        .close()
-        .catch((e) => console.error('Error closing AudioContext', e));
+    if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
+      await audioContextRef.current.close();
     }
     audioContextRef.current = null;
-
-    if (db && selectedDevice) {
-      setDoc(doc(db, 'devices', selectedDevice), { status: 'offline', decibel: 0 }, { merge: true })
-      .catch((error) => {
+    analyserRef.current = null;
+    
+    const currentDb = dbRef.current;
+    const deviceId = selectedDeviceRef.current;
+    if (currentDb && deviceId) {
+      try {
+        await setDoc(doc(currentDb, 'devices', deviceId), { status: 'offline', decibel: 0 }, { merge: true });
+      } catch (error) {
         console.error('Error setting device to offline:', error);
-      });
+      }
     }
 
     setIsMonitoring(false);
     setDecibels(0);
     setIsOnline(false);
-  }, [db, selectedDevice]);
+  }, []);
 
   useEffect(() => {
     return () => {
