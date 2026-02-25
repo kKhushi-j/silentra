@@ -54,8 +54,7 @@ export function SensorView() {
   const valueHistoryRef = useRef<number[]>([]);
 
   const processAudio = useCallback(() => {
-    if (!analyserRef.current) {
-      // Continue the loop until the analyser is ready
+    if (!analyserRef.current || !db) {
       animationFrameRef.current = requestAnimationFrame(processAudio);
       return;
     }
@@ -71,7 +70,7 @@ export function SensorView() {
     const rms = Math.sqrt(sumSquares / dataArray.length);
     
     let dbValue = 20 * Math.log10(rms) + 90;
-    dbValue = Math.max(0, Math.min(120, dbValue));
+    dbValue = Math.max(20, Math.min(120, dbValue));
 
     valueHistoryRef.current.push(dbValue);
     if (valueHistoryRef.current.length > 5) valueHistoryRef.current.shift();
@@ -81,35 +80,30 @@ export function SensorView() {
     
     const now = Date.now();
     if (now - lastWriteTimeRef.current > 1000) {
-        if (db && selectedDevice) {
-            console.log("DB instance:", db);
-            console.log("Device ID:", selectedDevice);
-            lastWriteTimeRef.current = now;
+        lastWriteTimeRef.current = now;
 
-            const selectedZone = DEVICE_IDS.find(d => d.id === selectedDevice)?.label || 'Unknown';
-            
-            // This async function is 'fire and forget' inside the loop
-            const writeToFirestore = async () => {
-              try {
-                const deviceDocRef = doc(db, 'devices', selectedDevice);
-                await setDoc(
-                    deviceDocRef,
-                    {
-                        decibel: smoothedDb,
-                        timestamp: serverTimestamp(),
-                        zone: selectedZone,
-                        status: 'online',
-                    },
-                    { merge: true }
-                );
-                if (!isOnline) setIsOnline(true);
-              } catch (error) {
-                console.error("Firestore write error! Monitoring will continue.", error);
-                if (isOnline) setIsOnline(false); // Update UI indicator only
-              }
-            };
-            writeToFirestore();
-        }
+        const writeToFirestore = async (dbVal: number) => {
+          const selectedZone = DEVICE_IDS.find(d => d.id === selectedDevice)?.label || 'Unknown';
+          try {
+            console.log("Attempting Firestore write:", dbVal);
+            const deviceDocRef = doc(db, 'devices', selectedDevice);
+            await setDoc(
+                deviceDocRef,
+                {
+                    decibel: dbVal,
+                    timestamp: serverTimestamp(),
+                    zone: selectedZone,
+                    status: 'online',
+                },
+                { merge: true }
+            );
+            console.log("Firestore write success");
+            if (!isOnline) setIsOnline(true);
+          } catch (error) {
+            console.error("Firestore write failed:", error);
+          }
+        };
+        writeToFirestore(smoothedDb);
     }
 
     animationFrameRef.current = requestAnimationFrame(processAudio);
@@ -170,7 +164,7 @@ export function SensorView() {
 
     if (db && selectedDevice) {
         const deviceRef = doc(db, 'devices', selectedDevice);
-        setDoc(deviceRef, { status: 'offline', timestamp: serverTimestamp() }, { merge: true })
+        setDoc(deviceRef, { status: 'offline', decibel: 0, timestamp: serverTimestamp() }, { merge: true })
         .catch(error => {
             console.error("Error setting device to offline:", error);
         });
@@ -183,20 +177,10 @@ export function SensorView() {
   }, [db, selectedDevice]);
 
   useEffect(() => {
-    // This effect handles cleanup when the component unmounts.
     return () => {
-      // We check the ref directly to see if monitoring is active
-      if (animationFrameRef.current) {
-        cancelAnimationFrame(animationFrameRef.current);
-      }
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach(track => track.stop());
-      }
-      if (audioContextRef.current && audioContextRef.current.state === 'running') {
-        audioContextRef.current.close();
-      }
+      stopMonitoring();
     };
-  }, []);
+  }, [stopMonitoring]);
 
 
   return (
