@@ -25,6 +25,28 @@
         }
       },
       "required": ["decibel", "timestamp", "zone", "status"]
+    },
+    "Sensor": {
+      "title": "Sensor",
+      "description": "A sensor device that records environmental data.",
+      "type": "object",
+      "properties": {
+        "level": {
+          "type": "number",
+          "description": "The reading value from the sensor."
+        },
+        "status": {
+          "type": "string",
+          "description": "The online status of the sensor device.",
+          "enum": ["online", "offline"]
+        },
+        "lastUpdated": {
+          "type": "string",
+          "format": "date-time",
+          "description": "The server timestamp of when the reading was recorded."
+        }
+      },
+      "required": ["level", "status", "lastUpdated"]
     }
   },
   "auth": {
@@ -36,6 +58,12 @@
         "$ref": "#/backend/entities/DeviceReading"
       },
       "description": "Stores real-time decibel readings from sensor devices like Mic_A, Mic_B, etc."
+    },
+    "/sensors/{sensorId}": {
+      "schema": {
+        "$ref": "#/backend/entities/Sensor"
+      },
+      "description": "Stores real-time data from sensor devices."
     }
   }
 }

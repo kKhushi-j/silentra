@@ -4,5 +4,8 @@ service cloud.firestore {
     match /devices/{deviceId} {
       allow read, write: if true; // WARNING: Publicly accessible. Secure before production.
     }
+    match /sensors/{sensorId} {
+      allow read, write: if true; // WARNING: Publicly accessible. Secure before production.
+    }
   }
 }
