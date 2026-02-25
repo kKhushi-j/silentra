@@ -18,11 +18,20 @@ export default function SensorPage() {
       interval = setInterval(async () => {
         const randomLevel = Math.floor(Math.random() * 100);
 
-        await setDoc(doc(db, "sensors", zone), {
-          level: randomLevel,
-          status: "online",
-          lastUpdated: serverTimestamp(),
-        });
+        console.log("🔥 Interval running");
+        console.log("Zone:", zone);
+
+        try {
+          await setDoc(doc(db, "sensors", zone), {
+            level: randomLevel,
+            status: "online",
+            lastUpdated: serverTimestamp(),
+          });
+
+          console.log("✅ Write SUCCESS");
+        } catch (error) {
+          console.error("❌ Write FAILED:", error);
+        }
       }, 1000);
     }
 
