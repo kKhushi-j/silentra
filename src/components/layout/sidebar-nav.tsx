@@ -9,12 +9,13 @@ import {
   SidebarMenuButton,
   SidebarContent,
 } from '@/components/ui/sidebar';
-import { AreaChart, Bot, Library, Settings, LayoutDashboard } from 'lucide-react';
+import { AreaChart, Bot, Library, Settings, LayoutDashboard, Map } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 export const navItems = [
   { href: '/', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/analytics', label: 'Analytics', icon: AreaChart },
+  { href: '/heatmap', label: 'Heatmap', icon: Map },
   { href: '/reference', label: 'Reference', icon: Library },
   { href: '/settings', label: 'Settings', icon: Settings },
 ];
