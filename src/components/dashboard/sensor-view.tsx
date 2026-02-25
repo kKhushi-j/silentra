@@ -74,96 +74,13 @@ export function SensorView() {
   }
 
   const startMonitoring = async () => {
-      if (monitoringRef.current) return;
-
-      if (!navigator.mediaDevices?.getUserMedia) {
-          toast({ variant: 'destructive', title: 'Not Supported', description: 'Your browser does not support microphone access.' });
-          setHasMicPermission(false);
-          return;
-      }
-      
-      try {
-          const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-          streamRef.current = stream;
-          setHasMicPermission(true);
-
-          const context = new (window.AudioContext || (window as any).webkitAudioContext)();
-          if (context.state === 'suspended') await context.resume();
-          audioContextRef.current = context;
-
-          const source = context.createMediaStreamSource(stream);
-          analyserRef.current = context.createAnalyser();
-          analyserRef.current.fftSize = 2048;
-          source.connect(analyserRef.current);
-          dataArrayRef.current = new Uint8Array(analyserRef.current.frequencyBinCount);
-      } catch (err) {
-          console.error('Error accessing microphone:', err);
-          setHasMicPermission(false);
-          toast({ variant: 'destructive', title: 'Microphone Access Denied', description: 'Please enable microphone access in your browser settings.' });
-          return;
-      }
-
-      monitoringRef.current = true;
-      setIsMonitoring(true);
-
-      const deviceRef = doc(db, "devices", selectedDevice);
-
-      const runLoop = async () => {
-          while (monitoringRef.current) {
-              const dbValue = getCurrentDecibelLevel();
-              setDecibels(dbValue);
-
-              try {
-                  await setDoc(deviceRef, {
-                      level: Math.round(dbValue),
-                      status: "online",
-                      lastUpdated: new Date().toISOString()
-                  }, { merge: true });
-                  
-                  if(!isOnline) setIsOnline(true);
-                  console.log("Write success");
-              } catch (error) {
-                  console.error("Firestore ERROR:", error);
-                  if(isOnline) setIsOnline(false);
-              }
-              
-              await new Promise(resolve => setTimeout(resolve, 1000));
-          }
-      };
-
-      runLoop();
+    console.log("Start clicked");
+    setIsMonitoring(true);
   };
 
   const stopMonitoring = async () => {
-      if (!monitoringRef.current) return;
-      
-      monitoringRef.current = false;
-      setIsMonitoring(false);
-      setIsOnline(false);
-
-      if (streamRef.current) {
-          streamRef.current.getTracks().forEach((track) => track.stop());
-          streamRef.current = null;
-      }
-      if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
-          await audioContextRef.current.close();
-          audioContextRef.current = null;
-      }
-      analyserRef.current = null;
-      dataArrayRef.current = null;
-      setDecibels(0);
-
-      const deviceRef = doc(db, "devices", selectedDevice);
-      try {
-          await setDoc(deviceRef, {
-              status: "offline",
-              level: 0,
-              lastUpdated: new Date().toISOString()
-          }, { merge: true });
-          console.log("Stopped and marked offline");
-      } catch (error) {
-          console.error("Stop ERROR:", error);
-      }
+    console.log("Stop clicked");
+    setIsMonitoring(false);
   };
   
   useEffect(() => {
@@ -264,20 +181,15 @@ export function SensorView() {
           </div>
         </CardContent>
         <CardFooter className="flex flex-col gap-2">
-          {!isMonitoring ? (
-            <Button onClick={startMonitoring} size="lg" className="w-full">
-              <Radio className="mr-2" /> Start Monitoring
-            </Button>
-          ) : (
-            <Button
-              onClick={stopMonitoring}
-              size="lg"
-              variant="destructive"
-              className="w-full"
-            >
-              <Square className="mr-2" /> Stop Monitoring
-            </Button>
-          )}
+          <Button
+            onClick={isMonitoring ? stopMonitoring : startMonitoring}
+            size="lg"
+            variant={isMonitoring ? 'destructive' : 'default'}
+            className="w-full"
+          >
+            {isMonitoring ? <Square className="mr-2" /> : <Radio className="mr-2" />}
+            {isMonitoring ? 'Stop Monitoring' : 'Start Monitoring'}
+          </Button>
         </CardFooter>
       </Card>
     </div>
