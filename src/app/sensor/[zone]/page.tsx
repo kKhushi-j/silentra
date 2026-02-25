@@ -6,6 +6,7 @@ import { doc, setDoc, serverTimestamp } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 
 export default function SensorPage() {
+  console.log("Connected Project ID:", process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID);
   const params = useParams();
   const zone = params.zone as string;
 
