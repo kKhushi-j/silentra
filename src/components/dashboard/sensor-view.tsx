@@ -70,8 +70,9 @@ export function SensorView() {
   const writeToFirestore = useCallback(async (dbLevel: number) => {
     const currentDb = dbRef.current;
     const deviceId = selectedDeviceRef.current;
-    const selectedZoneLabel = DEVICE_IDS.find(d => d.id === deviceId)?.label || 'Unknown';
     
+    console.log("Selected Sensor ID:", deviceId);
+  
     console.log("DB instance:", currentDb);
     if (!currentDb) {
       console.error("DB is undefined!");
@@ -80,15 +81,13 @@ export function SensorView() {
   
     try {
       console.log("Writing to Firestore:", deviceId);
-      const ref = doc(currentDb, "devices", deviceId);
-      console.log("Document ref:", ref);
+      const deviceRef = doc(currentDb, "devices", deviceId);
   
-      await setDoc(ref, {
-        decibel: Math.round(dbLevel),
-        timestamp: serverTimestamp(),
+      await setDoc(deviceRef, {
+        level: Math.round(dbLevel),
         status: "online",
-        zone: selectedZoneLabel
-      });
+        lastUpdated: serverTimestamp()
+      }, { merge: true });
   
       console.log("Write success");
       if (!isOnlineRef.current) setIsOnline(true);
@@ -189,7 +188,7 @@ export function SensorView() {
     const deviceId = selectedDeviceRef.current;
     if (currentDb && deviceId) {
       try {
-        await setDoc(doc(currentDb, 'devices', deviceId), { status: 'offline', decibel: 0 }, { merge: true });
+        await setDoc(doc(currentDb, 'devices', deviceId), { status: 'offline' }, { merge: true });
       } catch (error) {
         console.error('Error setting device to offline:', error);
       }

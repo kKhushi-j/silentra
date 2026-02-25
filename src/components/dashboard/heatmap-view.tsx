@@ -42,7 +42,7 @@ type DeviceState = {
   id: DeviceId;
   zone: string;
   position: { top: string; left: string };
-  decibel: number;
+  level: number;
   classification: NoiseClassification;
   lastUpdate: number;
   isOnline: boolean;
@@ -92,7 +92,7 @@ const initialDevices: Record<DeviceId, DeviceState> = {
     id: 'Mic_A',
     zone: 'Front Left',
     position: { top: '25%', left: '25%' },
-    decibel: 0,
+    level: 0,
     classification: 'Offline',
     lastUpdate: 0,
     isOnline: false,
@@ -101,7 +101,7 @@ const initialDevices: Record<DeviceId, DeviceState> = {
     id: 'Mic_B',
     zone: 'Front Right',
     position: { top: '25%', left: '75%' },
-    decibel: 0,
+    level: 0,
     classification: 'Offline',
     lastUpdate: 0,
     isOnline: false,
@@ -110,7 +110,7 @@ const initialDevices: Record<DeviceId, DeviceState> = {
     id: 'Mic_C',
     zone: 'Back Left',
     position: { top: '75%', left: '25%' },
-    decibel: 0,
+    level: 0,
     classification: 'Offline',
     lastUpdate: 0,
     isOnline: false,
@@ -119,7 +119,7 @@ const initialDevices: Record<DeviceId, DeviceState> = {
     id: 'Mic_D',
     zone: 'Back Right',
     position: { top: '75%', left: '75%' },
-    decibel: 0,
+    level: 0,
     classification: 'Offline',
     lastUpdate: 0,
     isOnline: false,
@@ -148,32 +148,32 @@ export function HeatmapView() {
       return onSnapshot(docRef, (docSnap) => {
         if (docSnap.exists()) {
           const data = docSnap.data() as {
-            decibel: number;
-            timestamp: Timestamp;
+            level: number;
+            lastUpdated: Timestamp;
             status: 'online' | 'offline';
           };
           
           if (data.status === 'offline') {
             setDevices(prev => ({
               ...prev,
-              [deviceId]: { ...prev[deviceId], isOnline: false, decibel: 0, classification: 'Offline' }
+              [deviceId]: { ...prev[deviceId], isOnline: false, level: 0, classification: 'Offline' }
             }));
             return;
           }
 
           const history = historyRef.current[deviceId];
-          history.push(data.decibel);
+          history.push(data.level);
           if (history.length > 5) history.shift();
 
-          const smoothedDecibel = history.reduce((a, b) => a + b, 0) / history.length;
+          const smoothedLevel = history.reduce((a, b) => a + b, 0) / history.length;
 
           setDevices((prevDevices) => ({
             ...prevDevices,
             [deviceId]: {
               ...prevDevices[deviceId],
-              decibel: smoothedDecibel,
-              classification: getClassification(smoothedDecibel),
-              lastUpdate: data.timestamp.toMillis(),
+              level: smoothedLevel,
+              classification: getClassification(smoothedLevel),
+              lastUpdate: data.lastUpdated.toMillis(),
               isOnline: true,
             },
           }));
@@ -193,7 +193,7 @@ export function HeatmapView() {
         for (const deviceId of DEVICE_IDS) {
           const device = newDevices[deviceId as DeviceId];
           if (device.isOnline && now - device.lastUpdate > OFFLINE_THRESHOLD) {
-            newDevices[deviceId as DeviceId] = { ...device, isOnline: false, decibel: 0, classification: 'Offline' };
+            newDevices[deviceId as DeviceId] = { ...device, isOnline: false, level: 0, classification: 'Offline' };
             changed = true;
           }
         }
@@ -224,8 +224,8 @@ export function HeatmapView() {
 
   const { highestDevice, averageNoise } = useMemo(() => {
     if (onlineDevices.length === 0) return { highestDevice: null, averageNoise: 0 };
-    const highest = onlineDevices.reduce((max, device) => device.decibel > max.decibel ? device : max);
-    const avg = onlineDevices.reduce((sum, d) => sum + d.decibel, 0) / onlineDevices.length;
+    const highest = onlineDevices.reduce((max, device) => device.level > max.level ? device : max);
+    const avg = onlineDevices.reduce((sum, d) => sum + d.level, 0) / onlineDevices.length;
     return { highestDevice: highest, averageNoise: avg };
   }, [onlineDevices]);
   
@@ -280,7 +280,7 @@ export function HeatmapView() {
                         <Zap className="text-primary neon-glow-accent" />
                         <div>
                             <p className="font-medium">Peak Intensity</p>
-                            <p className="text-muted-foreground font-bold">{Math.round(highestDevice?.decibel || 0)} dB ({highestDevice?.zone || 'N/A'})</p>
+                            <p className="text-muted-foreground font-bold">{Math.round(highestDevice?.level || 0)} dB ({highestDevice?.zone || 'N/A'})</p>
                         </div>
                     </div>
                      <div className='flex items-center gap-3'>
@@ -298,7 +298,7 @@ export function HeatmapView() {
               {deviceArray.map((device) => {
                 const isHighest = highestDevice && device.id === highestDevice.id && device.isOnline;
                 const colorConfig = CLASSIFICATION_COLORS[device.classification];
-                const size = 60 + device.decibel;
+                const size = 60 + device.level;
 
                 return (
                   <div
@@ -317,7 +317,7 @@ export function HeatmapView() {
                   >
                     <div className="text-center text-white font-bold">
                       <div className="text-lg drop-shadow-md">
-                        {Math.round(device.decibel)}
+                        {Math.round(device.level)}
                         <span className="text-xs">dB</span>
                       </div>
                       <Badge variant="secondary" className="mt-1 text-[10px] px-1.5 py-0 h-auto bg-black/30 backdrop-blur-sm">
