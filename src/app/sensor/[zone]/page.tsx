@@ -38,11 +38,16 @@ export default function SensorPage() {
   const stopSensor = async () => {
     console.log("🔴 Stopping sensor:", zone);
 
+    // 1️⃣ Immediately update UI
+    setRunning(false);
+
+    // 2️⃣ Stop interval instantly
     if (intervalRef.current) {
       clearInterval(intervalRef.current);
       intervalRef.current = null;
     }
 
+    // 3️⃣ Update Firestore
     try {
       await setDoc(
         doc(db, "sensors", zone),
@@ -55,8 +60,6 @@ export default function SensorPage() {
     } catch (err) {
       console.error("❌ Stop write error:", err);
     }
-
-    setRunning(false);
   };
 
   return (
