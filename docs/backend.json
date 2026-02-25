@@ -1,0 +1,36 @@
+{
+  "entities": {
+    "DeviceReading": {
+      "title": "Device Reading",
+      "description": "A single decibel reading from a sensor device.",
+      "type": "object",
+      "properties": {
+        "decibel": {
+          "type": "number",
+          "description": "The decibel value of the noise reading."
+        },
+        "timestamp": {
+          "type": "string",
+          "format": "date-time",
+          "description": "The server timestamp of when the reading was recorded."
+        },
+        "zone": {
+          "type": "string",
+          "description": "The zone identifier for the device (e.g., 'Top Left')."
+        }
+      },
+      "required": ["decibel", "timestamp", "zone"]
+    }
+  },
+  "auth": {
+    "providers": []
+  },
+  "firestore": {
+    "/devices/{deviceId}": {
+      "schema": {
+        "$ref": "#/backend/entities/DeviceReading"
+      },
+      "description": "Stores real-time decibel readings from sensor devices like Mic_A, Mic_B, etc."
+    }
+  }
+}
