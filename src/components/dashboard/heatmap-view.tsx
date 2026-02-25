@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useMemo } from 'react';
 import Image from 'next/image';
-import { collection, doc, onSnapshot, Timestamp } from 'firebase/firestore';
+import { doc, onSnapshot } from 'firebase/firestore';
 import { useFirestore } from '@/firebase';
 import {
   Card,
@@ -16,7 +16,7 @@ import { Input } from '@/components/ui/input';
 import { PlaceHolderImages } from '@/lib/placeholder-images';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
-import { Upload, Wifi, WifiOff, Zap, BarChart, Rss } from 'lucide-react';
+import { Upload, Wifi, WifiOff, Zap, BarChart } from 'lucide-react';
 import { Skeleton } from '../ui/skeleton';
 
 const defaultImageUrl =
@@ -149,7 +149,7 @@ export function HeatmapView() {
         if (docSnap.exists()) {
           const data = docSnap.data() as {
             level: number;
-            lastUpdated: Timestamp;
+            lastUpdated: string;
             status: 'online' | 'offline';
           };
           
@@ -173,7 +173,7 @@ export function HeatmapView() {
               ...prevDevices[deviceId],
               level: smoothedLevel,
               classification: getClassification(smoothedLevel),
-              lastUpdate: data.lastUpdated.toMillis(),
+              lastUpdate: new Date(data.lastUpdated).getTime(),
               isOnline: true,
             },
           }));

@@ -73,7 +73,6 @@ export function SensorView() {
     
     console.log("Selected Sensor ID:", deviceId);
   
-    console.log("DB instance:", currentDb);
     if (!currentDb) {
       console.error("DB is undefined!");
       return;
@@ -86,7 +85,7 @@ export function SensorView() {
       await setDoc(deviceRef, {
         level: Math.round(dbLevel),
         status: "online",
-        lastUpdated: serverTimestamp()
+        lastUpdated: new Date().toISOString()
       }, { merge: true });
   
       console.log("Write success");
