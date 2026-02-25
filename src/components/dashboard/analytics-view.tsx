@@ -1,4 +1,4 @@
-'use client';
+"use client";
 
 import { useState, useEffect, useMemo } from 'react';
 import {
@@ -30,40 +30,17 @@ import { dailyNoiseAnomalySummary } from '@/ai/flows/daily-noise-anomaly-summary
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useToast } from '@/hooks/use-toast';
+import { collection, query, orderBy, limit, onSnapshot } from 'firebase/firestore';
+import { db } from '@/lib/firebase';
 
 type NoiseData = {
   time: Date;
   decibels: number;
+  zone: string;
   classification: 'Silent' | 'Moderate' | 'Warning' | 'Critical' | 'Emergency';
 };
 
-const getClassification = (
-  db: number
-): 'Silent' | 'Moderate' | 'Warning' | 'Critical' | 'Emergency' => {
-  if (db < 40) return 'Silent';
-  if (db < 60) return 'Moderate';
-  if (db < 80) return 'Warning';
-  if (db < 100) return 'Critical';
-  return 'Emergency';
-};
-
-const generateMockData = (count: number): NoiseData[] => {
-  const data: NoiseData[] = [];
-  let currentDb = 55;
-  const now = new Date();
-  for (let i = count - 1; i >= 0; i--) {
-    const change = (Math.random() - 0.45) * 15;
-    currentDb += change;
-    currentDb = Math.max(20, Math.min(110, currentDb));
-    const time = new Date(now.getTime() - i * 60 * 1000); // one minute intervals
-    data.push({
-      time,
-      decibels: Math.round(currentDb),
-      classification: getClassification(currentDb),
-    });
-  }
-  return data;
-};
+const defaultThresholds = { silent: 40, warning: 80, critical: 100 };
 
 const chartConfig = {
   decibels: {
@@ -72,28 +49,28 @@ const chartConfig = {
   },
 } satisfies ChartConfig;
 
-function AIGeneration({ data }: { data: NoiseData[] }) {
+function AIGeneration({ data, thresholds }: { data: NoiseData[], thresholds: any }) {
   const [summary, setSummary] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(false);
   const { toast } = useToast();
 
   const handleGenerateSummary = async () => {
+    if (data.length === 0) {
+      toast({ title: "No data", description: "Wait for real sensor data to arrive." });
+      return;
+    }
     setIsLoading(true);
     setSummary(null);
     try {
       const result = await dailyNoiseAnomalySummary({
-        environmentName: 'Simulated ICU',
+        environmentName: 'Silentra Protected Zone',
         date: new Date().toISOString().split('T')[0],
         noiseLogs: data.map((d) => ({
           timestamp: d.time.toISOString(),
           decibelValue: d.decibels,
           classification: d.classification,
         })),
-        thresholds: {
-          silent: 40,
-          warning: 80,
-          critical: 100,
-        },
+        thresholds: thresholds,
       });
       setSummary(result);
     } catch (error) {
@@ -113,7 +90,7 @@ function AIGeneration({ data }: { data: NoiseData[] }) {
       <CardHeader>
         <CardTitle>Daily AI Summary</CardTitle>
         <CardDescription>
-          Let SilentraAI analyze today&apos;s noise data to find anomalies and
+          Let SilentraAI analyze real-time recordings to find anomalies and
           provide insights.
         </CardDescription>
       </CardHeader>
@@ -161,15 +138,58 @@ function AIGeneration({ data }: { data: NoiseData[] }) {
 export function AnalyticsView() {
   const [data, setData] = useState<NoiseData[]>([]);
   const [timeRange, setTimeRange] = useState('6h');
+  const [thresholds, setThresholds] = useState(defaultThresholds);
+  const { toast } = useToast();
 
   useEffect(() => {
-    setData(generateMockData(360)); // 6 hours of data
-  }, []);
+    // Load thresholds
+    const savedSettings = localStorage.getItem('silentra_settings');
+    if (savedSettings) {
+      try {
+        const parsed = JSON.parse(savedSettings);
+        if (parsed.thresholds) setThresholds(parsed.thresholds);
+      } catch (e) {}
+    }
+
+    const getClassification = (db: number) => {
+      if (db <= thresholds.silent) return 'Silent';
+      if (db <= thresholds.warning) return 'Moderate';
+      if (db <= thresholds.critical) return 'Warning';
+      if (db <= thresholds.critical + 20) return 'Critical';
+      return 'Emergency';
+    };
+
+    // Listen for REAL readings
+    const q = query(
+      collection(db, "readings"),
+      orderBy("timestamp", "desc"),
+      limit(200)
+    );
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const readings = snapshot.docs.map(doc => {
+        const d = doc.data();
+        const level = d.level || 0;
+        return {
+          time: d.timestamp?.toDate() || new Date(),
+          decibels: level,
+          zone: d.zone || 'Unknown',
+          classification: getClassification(level)
+        } as NoiseData;
+      }).sort((a, b) => a.time.getTime() - b.time.getTime());
+      
+      setData(readings);
+    }, (error) => {
+      console.error("Firestore reading error:", error);
+      toast({ variant: "destructive", title: "Data Error", description: "Failed to fetch real-time analytics data." });
+    });
+
+    return () => unsubscribe();
+  }, [thresholds, toast]);
 
   const filteredData = useMemo(() => {
     const now = new Date();
-    const hours =
-      timeRange === '1h' ? 1 : timeRange === '6h' ? 6 : 24;
+    const hours = timeRange === '1h' ? 1 : timeRange === '6h' ? 6 : 24;
     const cutoff = new Date(now.getTime() - hours * 60 * 60 * 1000);
     return data.filter((d) => d.time > cutoff);
   }, [data, timeRange]);
@@ -178,8 +198,7 @@ export function AnalyticsView() {
     if (filteredData.length === 0) return null;
     const decibels = filteredData.map((d) => d.decibels);
     const peak = Math.max(...decibels);
-    const avg =
-      decibels.reduce((sum, val) => sum + val, 0) / decibels.length;
+    const avg = decibels.reduce((sum, val) => sum + val, 0) / decibels.length;
     const warnings = filteredData.filter(
       (d) =>
         d.classification === 'Warning' ||
@@ -191,13 +210,10 @@ export function AnalyticsView() {
 
   if (data.length === 0) {
     return (
-      <div className="space-y-6">
-        <div className="grid gap-4 md:grid-cols-3">
-          {[...Array(3)].map((_, i) => (
-            <Skeleton key={i} className="h-32" />
-          ))}
-        </div>
-        <Skeleton className="h-96" />
+      <div className="flex flex-col items-center justify-center h-[60vh] gap-4">
+        <Zap className="w-12 h-12 text-muted-foreground animate-pulse" />
+        <h2 className="text-xl font-semibold">Waiting for sensor data...</h2>
+        <p className="text-muted-foreground">Start a sensor from the sensor dashboard to see real-time analytics.</p>
       </div>
     );
   }
@@ -207,7 +223,7 @@ export function AnalyticsView() {
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Average Noise</CardTitle>
+            <CardTitle className="text-sm font-medium">Average Noise (Real)</CardTitle>
             <TrendingUp className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
@@ -221,7 +237,7 @@ export function AnalyticsView() {
         </Card>
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Peak Noise</CardTitle>
+            <CardTitle className="text-sm font-medium">Peak Noise (Real)</CardTitle>
             <Zap className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
@@ -234,7 +250,7 @@ export function AnalyticsView() {
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">
-              Anomalies
+              Real Anomalies
             </CardTitle>
             <AlertTriangle className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
@@ -267,9 +283,9 @@ export function AnalyticsView() {
         <TabsContent value="chart">
           <Card>
             <CardHeader>
-              <CardTitle>Noise Levels Over Time</CardTitle>
+              <CardTitle>Real Noise Levels Over Time</CardTitle>
               <CardDescription>
-                A chart showing decibel levels recorded in the last {timeRange}.
+                Live data streams from your active sensors.
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -315,9 +331,9 @@ export function AnalyticsView() {
         <TabsContent value="log">
           <Card>
             <CardHeader>
-              <CardTitle>Detailed Noise Log</CardTitle>
+              <CardTitle>Live Device Log</CardTitle>
               <CardDescription>
-                A list of all noise events from the last {timeRange}.
+                Historical logs being recorded from active zones.
               </CardDescription>
             </CardHeader>
             <CardContent className="max-h-[30rem] overflow-auto">
@@ -325,7 +341,8 @@ export function AnalyticsView() {
                 <TableHeader className="sticky top-0 bg-card">
                   <TableRow>
                     <TableHead>Timestamp</TableHead>
-                    <TableHead>Decibel Level</TableHead>
+                    <TableHead>Zone</TableHead>
+                    <TableHead>Level</TableHead>
                     <TableHead>Classification</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -337,6 +354,9 @@ export function AnalyticsView() {
                       <TableRow key={index}>
                         <TableCell>
                           {entry.time.toLocaleTimeString()}
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant="outline">{entry.zone}</Badge>
                         </TableCell>
                         <TableCell>{entry.decibels} dB</TableCell>
                         <TableCell>
@@ -361,7 +381,7 @@ export function AnalyticsView() {
           </Card>
         </TabsContent>
         <TabsContent value="ai">
-          <AIGeneration data={filteredData} />
+          <AIGeneration data={filteredData} thresholds={thresholds} />
         </TabsContent>
       </Tabs>
     </div>

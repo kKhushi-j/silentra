@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { useParams } from "next/navigation";
-import { doc, setDoc, serverTimestamp } from "firebase/firestore";
+import { doc, setDoc, addDoc, collection, serverTimestamp } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 
 export default function SensorPage() {
@@ -41,6 +41,7 @@ export default function SensorPage() {
         const average = sum / dataArray.length;
         const level = Math.round(average);
 
+        // Update current status
         await setDoc(
           doc(db, "sensors", zone),
           {
@@ -50,6 +51,13 @@ export default function SensorPage() {
           },
           { merge: true }
         );
+
+        // Log historical data for analytics
+        await addDoc(collection(db, "readings"), {
+          zone: zone,
+          level: level,
+          timestamp: serverTimestamp(),
+        });
       }, 1000);
 
       setRunning(true);

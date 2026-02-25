@@ -1,4 +1,4 @@
-'use client';
+"use client";
 
 import { useEffect, useState } from "react";
 import { collection, onSnapshot } from "firebase/firestore";
@@ -8,11 +8,27 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Map as MapIcon, Upload } from "lucide-react";
 
+const defaultThresholds = { silent: 30, warning: 60, critical: 80 };
+
 export default function HeatmapPage() {
   const [sensors, setSensors] = useState<any[]>([]);
   const [image, setImage] = useState<string | null>(null);
+  const [thresholds, setThresholds] = useState(defaultThresholds);
 
   useEffect(() => {
+    // Load thresholds from settings
+    const savedSettings = localStorage.getItem('silentra_settings');
+    if (savedSettings) {
+      try {
+        const parsed = JSON.parse(savedSettings);
+        if (parsed.thresholds) {
+          setThresholds(parsed.thresholds);
+        }
+      } catch (e) {
+        console.error("Error parsing settings", e);
+      }
+    }
+
     const unsubscribe = onSnapshot(collection(db, "sensors"), (snapshot) => {
       const data = snapshot.docs.map((doc) => ({
         id: doc.id,
@@ -25,8 +41,8 @@ export default function HeatmapPage() {
   }, []);
 
   const getColor = (level: number) => {
-    if (level < 30) return "rgba(34, 197, 94, 0.8)"; // green-500
-    if (level < 60) return "rgba(249, 115, 22, 0.85)"; // orange-500
+    if (level <= thresholds.silent) return "rgba(34, 197, 94, 0.8)"; // green-500
+    if (level <= thresholds.warning) return "rgba(249, 115, 22, 0.85)"; // orange-500
     return "rgba(239, 68, 68, 0.85)"; // red-500
   };
 
@@ -58,7 +74,7 @@ export default function HeatmapPage() {
         <CardHeader>
           <CardTitle>Room Layout</CardTitle>
           <CardDescription>
-            Upload your environment floor plan to visualize real-time noise distribution.
+            Upload your environment floor plan to visualize real-time noise distribution based on current thresholds.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -119,15 +135,15 @@ export default function HeatmapPage() {
           <div className="flex flex-wrap gap-8 justify-center">
             <div className="flex items-center gap-3">
               <div className="w-4 h-4 bg-green-500 rounded-full shadow-[0_0_10px_rgba(34,197,94,0.5)]"></div>
-              <span className="text-sm font-medium">Low Noise (&lt; 30dB)</span>
+              <span className="text-sm font-medium">Low (&le; {thresholds.silent}dB)</span>
             </div>
             <div className="flex items-center gap-3">
               <div className="w-4 h-4 bg-orange-500 rounded-full shadow-[0_0_10px_rgba(249,115,22,0.5)]"></div>
-              <span className="text-sm font-medium">Moderate (30-60dB)</span>
+              <span className="text-sm font-medium">Moderate ({thresholds.silent + 1}-{thresholds.warning}dB)</span>
             </div>
             <div className="flex items-center gap-3">
               <div className="w-4 h-4 bg-red-500 rounded-full shadow-[0_0_10px_rgba(239,68,68,0.5)]"></div>
-              <span className="text-sm font-medium">High Noise (&gt; 60dB)</span>
+              <span className="text-sm font-medium">High (&gt; {thresholds.warning}dB)</span>
             </div>
           </div>
         </CardContent>
