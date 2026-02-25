@@ -30,6 +30,8 @@ import {
 import { useToast } from '@/hooks/use-toast';
 import { Alert, AlertDescription, AlertTitle } from '../ui/alert';
 import { useAudioAlerts } from '@/hooks/use-audio-alerts';
+import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
+import { db } from '@/lib/firebase';
 
 export type NoiseClassification =
   | 'Silent'
@@ -71,6 +73,7 @@ export function RealtimeMonitor({ onNewData }: RealtimeMonitorProps) {
   const streamRef = useRef<MediaStream | null>(null);
   const animationFrameId = useRef<number | null>(null);
   const simulatedIntervalId = useRef<NodeJS.Timeout | null>(null);
+  const loggingIntervalId = useRef<NodeJS.Timeout | null>(null);
 
   const { toast } = useToast();
 
@@ -100,6 +103,20 @@ export function RealtimeMonitor({ onNewData }: RealtimeMonitorProps) {
     }
   }, []);
 
+  // Shared function to log current noise to Firestore
+  const logNoiseToFirestore = useCallback(async (currentDb: number) => {
+    if (monitoringState === 'stopped') return;
+    try {
+      await addDoc(collection(db, "readings"), {
+        zone: "Dashboard",
+        level: Math.round(currentDb),
+        timestamp: serverTimestamp(),
+      });
+    } catch (err) {
+      console.error("Firestore logging failed:", err);
+    }
+  }, [monitoringState]);
+
   const stopMonitoring = useCallback(() => {
     if (animationFrameId.current) {
       cancelAnimationFrame(animationFrameId.current);
@@ -108,6 +125,10 @@ export function RealtimeMonitor({ onNewData }: RealtimeMonitorProps) {
     if (simulatedIntervalId.current) {
       clearInterval(simulatedIntervalId.current);
       simulatedIntervalId.current = null;
+    }
+    if (loggingIntervalId.current) {
+      clearInterval(loggingIntervalId.current);
+      loggingIntervalId.current = null;
     }
     streamRef.current?.getTracks().forEach((track) => track.stop());
     streamRef.current = null;
@@ -153,6 +174,8 @@ export function RealtimeMonitor({ onNewData }: RealtimeMonitorProps) {
 
       const dataArray = new Uint8Array(analyser.frequencyBinCount);
 
+      let latestDb = 0;
+
       const processAudio = () => {
         if (analyser && audioContextRef.current?.state === 'running') {
           analyser.getByteFrequencyData(dataArray);
@@ -163,15 +186,21 @@ export function RealtimeMonitor({ onNewData }: RealtimeMonitorProps) {
           const average = sum / dataArray.length;
 
           const db = 20 + (average / 255) * 100;
-          const clampedDb = Math.min(db, 120);
+          latestDb = Math.min(db, 120);
 
-          setDecibels(clampedDb);
-          onNewData(clampedDb);
+          setDecibels(latestDb);
+          onNewData(latestDb);
           animationFrameId.current = requestAnimationFrame(processAudio);
         }
       };
 
       processAudio();
+
+      // Start periodic logging to Firestore (every 2 seconds to save quota but still show in charts)
+      loggingIntervalId.current = setInterval(() => {
+        logNoiseToFirestore(latestDb);
+      }, 2000);
+
     } catch (error) {
       console.error('Error accessing microphone:', error);
       setHasMicPermission(false);
@@ -183,12 +212,13 @@ export function RealtimeMonitor({ onNewData }: RealtimeMonitorProps) {
           'Please enable microphone permissions in your browser settings for live monitoring.',
       });
     }
-  }, [onNewData, stopMonitoring, toast]);
+  }, [onNewData, stopMonitoring, toast, logNoiseToFirestore]);
 
   const startSimulatedMonitoring = useCallback(() => {
     stopMonitoring();
     setMonitoringState('simulated');
     let currentDb = 55;
+    
     simulatedIntervalId.current = setInterval(() => {
       const change = (Math.random() - 0.45) * 15;
       currentDb += change;
@@ -196,7 +226,12 @@ export function RealtimeMonitor({ onNewData }: RealtimeMonitorProps) {
       setDecibels(currentDb);
       onNewData(currentDb);
     }, 1000);
-  }, [onNewData, stopMonitoring]);
+
+    loggingIntervalId.current = setInterval(() => {
+      logNoiseToFirestore(currentDb);
+    }, 2000);
+
+  }, [onNewData, stopMonitoring, logNoiseToFirestore]);
 
   useEffect(() => {
     return () => stopMonitoring();
