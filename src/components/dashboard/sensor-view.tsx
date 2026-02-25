@@ -49,11 +49,16 @@ export function SensorView() {
   const streamRef = useRef<MediaStream | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const animationFrameRef = useRef<number | null>(null);
+  
   const lastWriteTimeRef = useRef<number>(0);
   const valueHistoryRef = useRef<number[]>([]);
 
   const processAudio = useCallback(() => {
-    if (!analyserRef.current) return;
+    if (!analyserRef.current) {
+      // Continue the loop until the analyser is ready
+      animationFrameRef.current = requestAnimationFrame(processAudio);
+      return;
+    }
     
     const dataArray = new Uint8Array(analyserRef.current.fftSize);
     analyserRef.current.getByteTimeDomainData(dataArray);
@@ -65,10 +70,10 @@ export function SensorView() {
     }
     const rms = Math.sqrt(sumSquares / dataArray.length);
     
-    let db = 20 * Math.log10(rms) + 90;
-    db = Math.max(0, Math.min(120, db));
+    let dbValue = 20 * Math.log10(rms) + 90;
+    dbValue = Math.max(0, Math.min(120, dbValue));
 
-    valueHistoryRef.current.push(db);
+    valueHistoryRef.current.push(dbValue);
     if (valueHistoryRef.current.length > 5) valueHistoryRef.current.shift();
     const smoothedDb = valueHistoryRef.current.reduce((a, b) => a + b, 0) / valueHistoryRef.current.length;
 
@@ -77,19 +82,33 @@ export function SensorView() {
     const now = Date.now();
     if (now - lastWriteTimeRef.current > 1000) {
         if (db && selectedDevice) {
-            const deviceRef = doc(db, 'devices', selectedDevice);
-            setDoc(deviceRef, {
-                decibel: smoothedDb,
-                timestamp: serverTimestamp(),
-                zone: DEVICE_IDS.find(d => d.id === selectedDevice)?.label,
-                status: 'online',
-            }, { merge: true }).then(() => {
-                if (!isOnline) setIsOnline(true);
-            }).catch(error => {
-                console.error("Firestore write error:", error);
-                 if (isOnline) setIsOnline(false);
-            });
+            console.log("DB instance:", db);
+            console.log("Device ID:", selectedDevice);
             lastWriteTimeRef.current = now;
+
+            const selectedZone = DEVICE_IDS.find(d => d.id === selectedDevice)?.label || 'Unknown';
+            
+            // This async function is 'fire and forget' inside the loop
+            const writeToFirestore = async () => {
+              try {
+                const deviceDocRef = doc(db, 'devices', selectedDevice);
+                await setDoc(
+                    deviceDocRef,
+                    {
+                        decibel: smoothedDb,
+                        timestamp: serverTimestamp(),
+                        zone: selectedZone,
+                        status: 'online',
+                    },
+                    { merge: true }
+                );
+                if (!isOnline) setIsOnline(true);
+              } catch (error) {
+                console.error("Firestore write error! Monitoring will continue.", error);
+                if (isOnline) setIsOnline(false); // Update UI indicator only
+              }
+            };
+            writeToFirestore();
         }
     }
 
@@ -98,8 +117,6 @@ export function SensorView() {
   
   const startMonitoring = useCallback(async () => {
     console.log("Attempting to start monitoring...");
-    if (isMonitoring) return;
-
     if (!navigator.mediaDevices?.getUserMedia) {
       toast({ variant: 'destructive', title: 'Not Supported', description: 'Your browser does not support microphone access.' });
       setHasMicPermission(false);
@@ -123,8 +140,6 @@ export function SensorView() {
       source.connect(analyserRef.current);
       
       setIsMonitoring(true);
-      lastWriteTimeRef.current = 0;
-      valueHistoryRef.current = [];
       animationFrameRef.current = requestAnimationFrame(processAudio);
       console.log("Monitoring started successfully.");
 
@@ -133,32 +148,30 @@ export function SensorView() {
       setHasMicPermission(false);
       toast({ variant: 'destructive', title: 'Microphone Access Denied', description: 'Please enable microphone access in your browser settings.'});
     }
-  }, [isMonitoring, processAudio, toast]);
+  }, [processAudio, toast]);
 
   const stopMonitoring = useCallback(() => {
     console.log("Stopping monitoring...");
 
     if (animationFrameRef.current) {
-        cancelAnimationFrame(animationFrameRef.current);
-        animationFrameRef.current = null;
+      cancelAnimationFrame(animationFrameRef.current);
+      animationFrameRef.current = null;
     }
 
     if (streamRef.current) {
-        streamRef.current.getTracks().forEach(track => track.stop());
-        streamRef.current = null;
+      streamRef.current.getTracks().forEach(track => track.stop());
+      streamRef.current = null;
     }
 
     if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
-        audioContextRef.current.close().catch(e => console.error("Error closing AudioContext", e));
-        audioContextRef.current = null;
+      audioContextRef.current.close().catch(e => console.error("Error closing AudioContext", e));
+      audioContextRef.current = null;
     }
 
     if (db && selectedDevice) {
         const deviceRef = doc(db, 'devices', selectedDevice);
-        setDoc(deviceRef, {
-            status: 'offline',
-            timestamp: serverTimestamp(),
-        }, { merge: true }).catch(error => {
+        setDoc(deviceRef, { status: 'offline', timestamp: serverTimestamp() }, { merge: true })
+        .catch(error => {
             console.error("Error setting device to offline:", error);
         });
     }
@@ -166,17 +179,20 @@ export function SensorView() {
     setIsMonitoring(false);
     setDecibels(0);
     setIsOnline(false);
+    valueHistoryRef.current = [];
   }, [db, selectedDevice]);
 
   useEffect(() => {
-    // Cleanup on component unmount
+    // This effect handles cleanup when the component unmounts.
     return () => {
-      // Directly call cleanup logic here to ensure it runs on unmount
+      // We check the ref directly to see if monitoring is active
       if (animationFrameRef.current) {
         cancelAnimationFrame(animationFrameRef.current);
       }
-      streamRef.current?.getTracks().forEach(track => track.stop());
-      if (audioContextRef.current?.state === 'running') {
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(track => track.stop());
+      }
+      if (audioContextRef.current && audioContextRef.current.state === 'running') {
         audioContextRef.current.close();
       }
     };
