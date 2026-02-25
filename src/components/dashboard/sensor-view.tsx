@@ -55,38 +55,8 @@ export function SensorView() {
   const lastWriteTimeRef = useRef<number>(0);
   const valueHistoryRef = useRef<number[]>([]);
 
-  const testFirestore = async () => {
-    if (!db) {
-      console.error("Firestore DB instance not available for test.");
-      toast({ variant: 'destructive', title: "Firestore Not Initialized" });
-      return;
-    }
-    try {
-      console.log("Manual Firestore test started");
-    
-      await setDoc(
-        doc(db, "devices", "TEST_DEVICE"),
-        {
-          decibel: 99,
-          timestamp: serverTimestamp(),
-          status: "online",
-          zone: "TEST_ZONE"
-        },
-        { merge: true }
-      );
-    
-      console.log("Manual Firestore write success");
-      toast({ title: "Firestore Test", description: "Test write successful!" });
-    
-    } catch (error) {
-      console.error("Manual Firestore write failed:", error);
-      toast({ variant: 'destructive', title: "Firestore Test Failed", description: (error as Error).message });
-    }
-  };
-
   const processAudio = useCallback(() => {
-    if (!analyserRef.current || !db) {
-      animationFrameRef.current = requestAnimationFrame(processAudio);
+    if (!analyserRef.current) {
       return;
     }
     
@@ -100,7 +70,7 @@ export function SensorView() {
     }
     const rms = Math.sqrt(sumSquares / dataArray.length);
     
-    let dbValue = 20 * Math.log10(rms) + 90;
+    let dbValue = 20 * Math.log10(rms) + 94; // Adjusted for better range
     dbValue = Math.max(20, Math.min(120, dbValue));
 
     valueHistoryRef.current.push(dbValue);
@@ -110,32 +80,27 @@ export function SensorView() {
     setDecibels(smoothedDb);
     
     const now = Date.now();
-    if (now - lastWriteTimeRef.current > 1000) {
+    if (db && now - lastWriteTimeRef.current > 1000) { // Throttle writes to 1s
         lastWriteTimeRef.current = now;
-
-        const writeToFirestore = async (dbVal: number) => {
-          const selectedZone = DEVICE_IDS.find(d => d.id === selectedDevice)?.label || 'Unknown';
-          try {
-            console.log("Attempting Firestore write:", dbVal);
-            const deviceDocRef = doc(db, 'devices', selectedDevice);
-            await setDoc(
-                deviceDocRef,
-                {
-                    decibel: dbVal,
-                    timestamp: serverTimestamp(),
-                    zone: selectedZone,
-                    status: 'online',
-                },
-                { merge: true }
-            );
-            console.log("Firestore write success");
+        const selectedZone = DEVICE_IDS.find(d => d.id === selectedDevice)?.label || 'Unknown';
+        
+        console.log("Writing to Firestore:", selectedDevice);
+        setDoc(
+            doc(db, "devices", selectedDevice),
+            {
+                decibel: smoothedDb,
+                timestamp: serverTimestamp(),
+                zone: selectedZone,
+                status: 'online',
+            },
+            { merge: true }
+        ).then(() => {
+            console.log("Write success");
             if (!isOnline) setIsOnline(true);
-          } catch (error) {
+        }).catch((error) => {
             console.error("Firestore write failed:", error);
-            // We do NOT change monitoring state here.
-          }
-        };
-        writeToFirestore(smoothedDb);
+            // Do not stop monitoring on write failure
+        });
     }
 
     animationFrameRef.current = requestAnimationFrame(processAudio);
@@ -143,6 +108,11 @@ export function SensorView() {
   
   const startMonitoring = useCallback(async () => {
     console.log("Attempting to start monitoring...");
+    if (!db) {
+        toast({ variant: 'destructive', title: 'Firestore Not Ready', description: 'Please wait a moment and try again.'});
+        console.error("Firestore DB instance not available.");
+        return;
+    }
     if (!navigator.mediaDevices?.getUserMedia) {
       toast({ variant: 'destructive', title: 'Not Supported', description: 'Your browser does not support microphone access.' });
       setHasMicPermission(false);
@@ -174,7 +144,7 @@ export function SensorView() {
       setHasMicPermission(false);
       toast({ variant: 'destructive', title: 'Microphone Access Denied', description: 'Please enable microphone access in your browser settings.'});
     }
-  }, [processAudio, toast]);
+  }, [processAudio, toast, db]);
 
   const stopMonitoring = useCallback(() => {
     console.log("Stopping monitoring...");
@@ -196,7 +166,7 @@ export function SensorView() {
 
     if (db && selectedDevice) {
         const deviceRef = doc(db, 'devices', selectedDevice);
-        setDoc(deviceRef, { status: 'offline', decibel: 0, timestamp: serverTimestamp() }, { merge: true })
+        setDoc(deviceRef, { status: 'offline', decibel: 0 }, { merge: true })
         .catch(error => {
             console.error("Error setting device to offline:", error);
         });
@@ -209,6 +179,7 @@ export function SensorView() {
   }, [db, selectedDevice]);
 
   useEffect(() => {
+    // Cleanup on component unmount
     return () => {
       stopMonitoring();
     };
@@ -292,9 +263,6 @@ export function SensorView() {
               <Square className="mr-2" /> Stop Monitoring
             </Button>
           )}
-           <Button onClick={testFirestore} variant="outline" className="w-full">
-              Test Firestore Write
-            </Button>
         </CardFooter>
       </Card>
     </div>
