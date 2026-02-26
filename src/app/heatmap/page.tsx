@@ -1,29 +1,51 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { collection, onSnapshot } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Map as MapIcon, Upload } from "lucide-react";
+import { Map as MapIcon, Upload, Volume2, VolumeX, Bell, BellOff } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { useAudioAlerts } from "@/hooks/use-audio-alerts";
+import { useToast } from "@/hooks/use-toast";
 
 const defaultThresholds = { silent: 30, warning: 60, critical: 80 };
+const defaultAlertSettings = {
+  alertType: 'none',
+  voiceMessage: 'Attention: Noise levels are critical.',
+  adminContact: ''
+};
 
 export default function HeatmapPage() {
   const [sensors, setSensors] = useState<any[]>([]);
   const [image, setImage] = useState<string | null>(null);
   const [thresholds, setThresholds] = useState(defaultThresholds);
+  const [alertSettings, setAlertSettings] = useState(defaultAlertSettings);
+  
+  const [isAudioMuted, setIsAudioMuted] = useState(true);
+  const [isNotifMuted, setIsNotifMuted] = useState(true);
+  const [isAlertPlayedForCurrentEvent, setIsAlertPlayedForCurrentEvent] = useState(false);
+  const [consecutiveCriticalStart, setConsecutiveCriticalStart] = useState<number | null>(null);
+  const [hasNotifiedAdmin, setHasNotifiedAdmin] = useState(false);
+
+  const { playAlert } = useAudioAlerts();
+  const { toast } = useToast();
 
   useEffect(() => {
-    // Load thresholds from settings
+    // Load thresholds and alert settings
     const savedSettings = localStorage.getItem('silentra_settings');
     if (savedSettings) {
       try {
         const parsed = JSON.parse(savedSettings);
-        if (parsed.thresholds) {
-          setThresholds(parsed.thresholds);
-        }
+        if (parsed.thresholds) setThresholds(parsed.thresholds);
+        setAlertSettings({
+          alertType: parsed.alertType || 'none',
+          voiceMessage: parsed.voiceMessage || 'Attention: Noise levels are critical.',
+          adminContact: parsed.adminContact || ''
+        });
       } catch (e) {
         console.error("Error parsing settings", e);
       }
@@ -39,6 +61,38 @@ export default function HeatmapPage() {
 
     return () => unsubscribe();
   }, []);
+
+  // Monitor sensor levels for alerts and notifications
+  useEffect(() => {
+    const isAnyCritical = sensors.some(s => (s.level || 0) > thresholds.critical);
+
+    // Audio Alert Logic
+    if (isAnyCritical && !isAlertPlayedForCurrentEvent && !isAudioMuted) {
+      playAlert(alertSettings.alertType as any, alertSettings.voiceMessage);
+      setIsAlertPlayedForCurrentEvent(true);
+    } else if (!isAnyCritical) {
+      setIsAlertPlayedForCurrentEvent(false);
+    }
+
+    // Admin Notification Logic (10 seconds consecutive)
+    if (isAnyCritical) {
+      if (consecutiveCriticalStart === null) {
+        setConsecutiveCriticalStart(Date.now());
+      } else if (Date.now() - consecutiveCriticalStart >= 10000) {
+        if (!hasNotifiedAdmin && !isNotifMuted) {
+          toast({
+            variant: "destructive",
+            title: "CRITICAL NOISE ALERT",
+            description: `Noise levels have been critical for over 10 seconds. Notifying admin: ${alertSettings.adminContact || 'No contact provided'}`,
+          });
+          setHasNotifiedAdmin(true);
+        }
+      }
+    } else {
+      setConsecutiveCriticalStart(null);
+      setHasNotifiedAdmin(false);
+    }
+  }, [sensors, thresholds.critical, isAudioMuted, isNotifMuted, alertSettings, playAlert, isAlertPlayedForCurrentEvent, consecutiveCriticalStart, hasNotifiedAdmin, toast]);
 
   const getColor = (level: number) => {
     if (level <= thresholds.silent) return "rgba(34, 197, 94, 0.8)"; // green-500
@@ -65,16 +119,54 @@ export default function HeatmapPage() {
 
   return (
     <div className="space-y-6 max-w-5xl mx-auto">
-      <div className="flex items-center gap-3">
-        <MapIcon className="w-8 h-8 text-primary neon-glow" />
-        <h1 className="text-3xl font-bold font-headline">Live Noise Heatmap</h1>
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <MapIcon className="w-8 h-8 text-primary neon-glow" />
+          <h1 className="text-3xl font-bold font-headline">Live Noise Heatmap</h1>
+        </div>
+        
+        <div className="flex gap-2">
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="icon"
+                  onClick={() => setIsAudioMuted((p) => !p)}
+                  className={!isAudioMuted ? "border-primary text-primary neon-glow" : ""}
+                >
+                  {isAudioMuted ? <VolumeX className="h-5 w-5" /> : <Volume2 className="h-5 w-5" />}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>{isAudioMuted ? 'Unmute Audio Alerts' : 'Mute Audio Alerts'}</p>
+              </TooltipContent>
+            </Tooltip>
+            
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="icon"
+                  onClick={() => setIsNotifMuted((p) => !p)}
+                  className={!isNotifMuted ? "border-primary text-primary neon-glow" : ""}
+                >
+                  {isNotifMuted ? <BellOff className="h-5 w-5" /> : <Bell className="h-5 w-5" />}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>{isNotifMuted ? 'Enable Notifications' : 'Disable Notifications'}</p>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        </div>
       </div>
 
       <Card>
         <CardHeader>
           <CardTitle>Room Layout</CardTitle>
           <CardDescription>
-            Upload your environment floor plan to visualize real-time noise distribution based on current thresholds.
+            Visualize real-time noise distribution. Audio alerts will play when levels exceed {thresholds.critical}dB.
           </CardDescription>
         </CardHeader>
         <CardContent>

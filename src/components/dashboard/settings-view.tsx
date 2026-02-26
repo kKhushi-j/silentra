@@ -20,10 +20,11 @@ import { Slider } from '@/components/ui/slider';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
-import { Save } from 'lucide-react';
+import { Save, UserCog } from 'lucide-react';
 import { Separator } from '../ui/separator';
 import { RadioGroup, RadioGroupItem } from '../ui/radio-group';
 import { Textarea } from '../ui/textarea';
+import { Input } from '../ui/input';
 
 const environments = [
   { id: 'icu', name: 'ICU', thresholds: { silent: 40, warning: 75, critical: 90 } },
@@ -49,6 +50,7 @@ export function SettingsView() {
   const [thresholds, setThresholds] = useState<Thresholds>(selectedEnv.thresholds);
   const [alertType, setAlertType] = useState<AlertType>('none');
   const [voiceMessage, setVoiceMessage] = useState('Attention: Noise levels are critical.');
+  const [adminContact, setAdminContact] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const { toast } = useToast();
   
@@ -72,6 +74,9 @@ export function SettingsView() {
           if(savedSettings.voiceMessage) {
               setVoiceMessage(savedSettings.voiceMessage);
           }
+          if(savedSettings.adminContact) {
+              setAdminContact(savedSettings.adminContact);
+          }
       }
     } catch (e) {
       console.error('Could not parse settings from localStorage', e);
@@ -92,21 +97,20 @@ export function SettingsView() {
 
   const handleSave = () => {
     setIsSaving(true);
-    // Simulate saving to Firestore by saving to localStorage
     setTimeout(() => {
       setIsSaving(false);
       const settings = {
         environment: selectedEnv.id,
         thresholds,
         alertType,
-        voiceMessage
+        voiceMessage,
+        adminContact
       };
       localStorage.setItem('silentra_settings', JSON.stringify(settings));
       toast({
         title: "Settings Saved",
         description: `Settings for ${selectedEnv.name} have been updated.`,
       })
-      console.log('Saving to localStorage:', settings);
     }, 1000);
   }
 
@@ -193,6 +197,26 @@ export function SettingsView() {
             )}
         </div>
 
+        <Separator />
+
+        <div className="space-y-4">
+          <div className="flex items-center gap-2">
+            <UserCog className="w-5 h-5 text-primary" />
+            <h3 className="text-lg font-medium">Admin Notification Settings</h3>
+          </div>
+          <p className="text-sm text-muted-foreground">
+            Provide contact info to be notified when noise levels remain critical for more than 10 seconds.
+          </p>
+          <div className="grid w-full gap-2">
+            <Label htmlFor="admin-contact">Admin Contact Info (Email/Phone)</Label>
+            <Input 
+              id="admin-contact" 
+              placeholder="e.g., admin@hospital.com or +1 234 567 890" 
+              value={adminContact}
+              onChange={(e) => setAdminContact(e.target.value)}
+            />
+          </div>
+        </div>
 
       </CardContent>
       <CardFooter>
