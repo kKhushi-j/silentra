@@ -274,22 +274,20 @@ export function RealtimeMonitor({ onNewData }: RealtimeMonitorProps) {
   ]);
 
   const bgColorClass =
-    CLASSIFICATION_BG_COLORS[classification] || 'bg-gray-500/10';
+    CLASSIFICATION_BG_COLORS[classification] || 'bg-transparent';
 
   return (
     <Card
-      className={cn(
-        'transition-colors duration-500 min-h-[440px] flex flex-col',
-        bgColorClass
-      )}
+      className="relative overflow-hidden transition-all duration-1000 min-h-[440px] flex flex-col group card"
     >
-      <CardHeader>
-        <CardTitle>Real-time Monitor</CardTitle>
+      <div className={cn("absolute inset-0 transition-colors duration-1000 ease-in-out opacity-20", bgColorClass)}></div>
+      <CardHeader className="relative z-10">
+        <CardTitle className="text-xl font-bold tracking-tight">Real-time Monitor</CardTitle>
       </CardHeader>
-      <CardContent className="flex-1 flex items-center justify-center">
+      <CardContent className="flex-1 flex items-center justify-center relative z-10">
         {hasMicPermission === false && monitoringState === 'live' ? (
-          <div className="flex flex-col items-center justify-center h-full p-4 sm:p-6">
-            <Alert variant="destructive" className="w-full max-w-sm">
+          <div className="flex flex-col items-center justify-center h-full p-4 sm:p-6 animate-fade-in">
+            <Alert variant="destructive" className="w-full max-w-sm backdrop-blur-md bg-destructive/10 border-destructive/20">
               <MicOff className="h-4 w-4" />
               <AlertTitle>Microphone Access Required</AlertTitle>
               <AlertDescription>
@@ -297,13 +295,13 @@ export function RealtimeMonitor({ onNewData }: RealtimeMonitorProps) {
                 monitoring.
               </AlertDescription>
             </Alert>
-            <div className="my-8">
+            <div className="my-8 opacity-50">
               <NoiseGauge decibels={0} classification="Silent" />
             </div>
           </div>
         ) : (
-          <div className="p-4 sm:p-6 flex flex-col items-center justify-center relative">
-            <div className="absolute top-4 right-4 flex gap-2">
+          <div className="p-4 sm:p-6 flex flex-col items-center justify-center relative w-full">
+            <div className="absolute top-0 right-4 flex gap-2">
               <TooltipProvider>
                 <Tooltip>
                   <TooltipTrigger asChild>
@@ -312,15 +310,16 @@ export function RealtimeMonitor({ onNewData }: RealtimeMonitorProps) {
                       size="icon"
                       onClick={() => setIsAudioMuted((p) => !p)}
                       disabled={monitoringState === 'stopped'}
+                      className="rounded-full bg-white/5 hover:bg-white/10 transition-transform active:scale-95"
                     >
                       {isAudioMuted ? (
-                        <VolumeX className="h-5 w-5" />
+                        <VolumeX className="h-5 w-5 text-muted-foreground" />
                       ) : (
-                        <Volume2 className="h-5 w-5 text-primary neon-glow" />
+                        <Volume2 className="h-5 w-5 text-primary drop-shadow-[0_0_8px_hsl(var(--primary))]" />
                       )}
                     </Button>
                   </TooltipTrigger>
-                  <TooltipContent>
+                  <TooltipContent className="bg-background/90 backdrop-blur border-white/10">
                     <p>
                       {isAudioMuted
                         ? 'Unmute Audio Alerts'
@@ -335,15 +334,16 @@ export function RealtimeMonitor({ onNewData }: RealtimeMonitorProps) {
                       size="icon"
                       onClick={() => setIsNotifMuted((p) => !p)}
                       disabled={monitoringState === 'stopped'}
+                      className="rounded-full bg-white/5 hover:bg-white/10 transition-transform active:scale-95"
                     >
                       {isNotifMuted ? (
-                        <BellOff className="h-5 w-5" />
+                        <BellOff className="h-5 w-5 text-muted-foreground" />
                       ) : (
-                        <Bell className="h-5 w-5 text-primary neon-glow" />
+                        <Bell className="h-5 w-5 text-primary drop-shadow-[0_0_8px_hsl(var(--primary))]" />
                       )}
                     </Button>
                   </TooltipTrigger>
-                  <TooltipContent>
+                  <TooltipContent className="bg-background/90 backdrop-blur border-white/10">
                     <p>
                       {isNotifMuted
                         ? 'Enable Notifications'
@@ -353,34 +353,43 @@ export function RealtimeMonitor({ onNewData }: RealtimeMonitorProps) {
                 </Tooltip>
               </TooltipProvider>
             </div>
-            <NoiseGauge decibels={decibels} classification={classification} />
+            <div className="scale-110 transform transition-transform duration-500 my-8">
+              <NoiseGauge decibels={decibels} classification={classification} />
+            </div>
           </div>
         )}
       </CardContent>
-      <CardFooter className="flex flex-col sm:flex-row justify-center items-center gap-4 p-4 border-t">
+      <CardFooter className="flex flex-col sm:flex-row justify-center items-center gap-4 p-6 border-t border-white/5 relative z-10 bg-black/20">
         {monitoringState === 'stopped' ? (
           <>
-            <Button onClick={startLiveMonitoring} size="lg">
+            <Button onClick={startLiveMonitoring} size="lg" className="rounded-full shadow-[0_0_15px_hsl(var(--primary)/0.3)] hover:shadow-[0_0_25px_hsl(var(--primary)/0.5)] transition-all duration-300 hover:-translate-y-0.5 active:scale-95 font-medium">
               <Mic className="mr-2 h-4 w-4" />
-              Start Live Monitoring
+              Live Monitoring
             </Button>
             <Button
               onClick={startSimulatedMonitoring}
               size="lg"
-              variant="secondary"
+              variant="outline"
+              className="rounded-full bg-white/5 hover:bg-white/10 border-white/10 transition-all duration-300 hover:-translate-y-0.5 active:scale-95 font-medium"
             >
-              <Radio className="mr-2 h-4 w-4" />
-              Start Simulated Monitoring
+              <Radio className="mr-2 h-4 w-4 text-accent" />
+              Simulated Mode
             </Button>
           </>
         ) : (
-          <div className="flex flex-col items-center gap-4">
-            <p className="text-sm text-muted-foreground font-medium">
-              {monitoringState === 'live'
-                ? 'Live Monitoring Active'
-                : 'Simulated Monitoring Active'}
-            </p>
-            <Button onClick={stopMonitoring} size="lg" variant="destructive">
+          <div className="flex flex-col items-center gap-4 animate-fade-in w-full">
+            <div className="flex items-center gap-2">
+              <span className="relative flex h-3 w-3">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-3 w-3 bg-primary"></span>
+              </span>
+              <p className="text-sm text-primary font-medium tracking-wide">
+                {monitoringState === 'live'
+                  ? 'Live Audio Feed Active'
+                  : 'Simulation Active'}
+              </p>
+            </div>
+            <Button onClick={stopMonitoring} size="lg" variant="destructive" className="rounded-full shadow-[0_0_15px_hsl(var(--destructive)/0.3)] hover:shadow-[0_0_25px_hsl(var(--destructive)/0.5)] transition-all duration-300 hover:-translate-y-0.5 active:scale-95 font-medium w-full sm:w-auto">
               <Square className="mr-2 h-4 w-4" />
               Stop Monitoring
             </Button>
@@ -392,9 +401,9 @@ export function RealtimeMonitor({ onNewData }: RealtimeMonitorProps) {
 }
 
 const CLASSIFICATION_BG_COLORS: Record<NoiseClassification, string> = {
-  Silent: 'bg-green-500/10',
-  Moderate: 'bg-blue-500/10',
-  Warning: 'bg-yellow-500/10',
-  Critical: 'bg-orange-500/10',
-  Emergency: 'bg-red-500/10',
+  Silent: 'bg-green-500',
+  Moderate: 'bg-blue-500',
+  Warning: 'bg-yellow-500',
+  Critical: 'bg-orange-500',
+  Emergency: 'bg-red-500',
 };

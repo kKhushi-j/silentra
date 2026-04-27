@@ -27,19 +27,19 @@ export default function RootLayout({
           crossOrigin="anonymous"
         />
         <link
-          href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&display=swap"
+          href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;700&display=swap"
           rel="stylesheet"
         />
       </head>
-      <body className={cn('font-body antialiased')}>
+      <body className={cn('font-body antialiased min-h-screen bg-background text-foreground')}>
         <FirebaseClientProvider>
           <SidebarProvider>
             <Sidebar>
               <SidebarNav />
             </Sidebar>
-            <SidebarInset>
+            <SidebarInset className="bg-transparent">
               <Header />
-              <main className="flex-1 p-4 lg:p-6 overflow-auto">
+              <main className="flex-1 p-4 lg:p-8 overflow-auto animate-fade-in">
                 {children}
               </main>
             </SidebarInset>

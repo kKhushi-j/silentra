@@ -5,7 +5,7 @@ import { useRef, useCallback } from 'react';
 type AlertType = 'beep' | 'chime' | 'voice' | 'none';
 
 export const useAudioAlerts = () => {
-    const audioContextRef = useRef<AudioContext>();
+    const audioContextRef = useRef<AudioContext | undefined>(undefined);
 
     const getAudioContext = useCallback(() => {
         if (typeof window === 'undefined') return;
