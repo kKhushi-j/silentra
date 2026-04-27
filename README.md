@@ -48,5 +48,8 @@ Silentra is an innovative and practical solution to monitor and control noise po
 
 🔗 Live Demo :- 
          https://silentra-web.vercel.app/
+         
+   Sensors for Analytics comparison and Heatmap:- https://silentra-web.vercel.app/sensor/Mic_A ,
+                                                  https://silentra-web.vercel.app/sensor/Mic_D
 
 
